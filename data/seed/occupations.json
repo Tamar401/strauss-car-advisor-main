@@ -1,0 +1,100 @@
+[
+  {
+    "name": "נציג/ת מכירות שטח",
+    "group": "ב",
+    "car_required": true,
+    "waiver_allowed": false,
+    "waiver_maintenance": 0
+  },
+  {
+    "name": "מנהל/ת אזור מכירות",
+    "group": "ג",
+    "car_required": true,
+    "waiver_allowed": false,
+    "waiver_maintenance": 0
+  },
+  {
+    "name": "טכנאי/ת שירות",
+    "group": "א",
+    "car_required": true,
+    "waiver_allowed": false,
+    "waiver_maintenance": 0
+  },
+  {
+    "name": "נהג/ת הפצה",
+    "group": "א",
+    "car_required": true,
+    "waiver_allowed": false,
+    "waiver_maintenance": 0
+  },
+  {
+    "name": "מפקח/ת איכות במפעל",
+    "group": "א",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 1200
+  },
+  {
+    "name": "רכז/ת רכש",
+    "group": "א",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 1200
+  },
+  {
+    "name": "מהנדס/ת תהליך",
+    "group": "ב",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 1500
+  },
+  {
+    "name": "מפתח/ת תוכנה",
+    "group": "ב",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 1500
+  },
+  {
+    "name": "אנליסט/ית נתונים",
+    "group": "ב",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 1500
+  },
+  {
+    "name": "מנהל/ת מוצר",
+    "group": "ג",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 2000
+  },
+  {
+    "name": "מנהל/ת פיתוח",
+    "group": "ג",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 2000
+  },
+  {
+    "name": "מנהל/ת משאבי אנוש",
+    "group": "ג",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 2000
+  },
+  {
+    "name": "מנהל/ת מחלקה",
+    "group": "ד",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 2600
+  },
+  {
+    "name": "מנהל/ת חטיבה",
+    "group": "ד",
+    "car_required": false,
+    "waiver_allowed": true,
+    "waiver_maintenance": 3000
+  }
+]

@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * פלטה בהשראת לוגו שטראוס: אדום ראשי + שש צבעי עלי הכותרת.
+ * ערכי RGB בלי פסיקים — כדי ש-Tailwind יוכל להוסיף שקיפות (bg-brand/10).
+ */
+:root {
+  --bg: 251 249 247;
+  --surface: 255 255 255;
+  --muted: 245 241 238;
+  --border: 236 229 224;
+  --ink: 38 30 32;
+  --ink-soft: 112 100 102;
+
+  --brand: 225 37 27; /* אדום שטראוס — פעולות ראשיות */
+  --brand-soft: 253 233 231;
+  --accent: 244 121 32; /* כתום */
+
+  /* עלי הכותרת — לסימון סוגי הנעה, קבוצות וקישוטים */
+  --petal-red: 225 37 27;
+  --petal-orange: 244 121 32;
+  --petal-yellow: 253 185 19;
+  --petal-lime: 141 198 63;
+  --petal-green: 0 166 81;
+  --petal-teal: 0 169 181;
+  --petal-blue: 0 114 188;
+
+  --up: 0 140 70; /* נטו עולה */
+  --up-soft: 226 246 234;
+  --down: 196 30 58; /* נטו יורד — תמיד עם חץ, לא רק צבע */
+  --down-soft: 252 231 235;
+  --warn: 176 110 0; /* חסר מידע / ממתין לנציג */
+  --warn-soft: 255 244 214;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: 22 17 18;
+    --surface: 34 27 28;
+    --muted: 46 37 38;
+    --border: 64 52 54;
+    --ink: 246 240 238;
+    --ink-soft: 180 166 166;
+    --brand: 255 88 74;
+    --brand-soft: 72 28 26;
+    --accent: 255 150 72;
+    --petal-red: 255 88 74;
+    --petal-orange: 255 150 72;
+    --petal-yellow: 255 205 70;
+    --petal-lime: 166 220 90;
+    --petal-green: 52 205 120;
+    --petal-teal: 50 205 215;
+    --petal-blue: 80 165 240;
+    --up: 74 222 128;
+    --up-soft: 20 58 38;
+    --down: 255 110 130;
+    --down-soft: 74 24 34;
+    --warn: 255 200 60;
+    --warn-soft: 66 48 12;
+  }
+}
+
+body {
+  @apply bg-bg text-ink font-sans antialiased;
+}
+
+/* מספרים: ספרות ברוחב קבוע ותמיד משמאל-לימין גם בתוך טקסט עברי */
+.num {
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+@layer components {
+  /* פס הקשת של עלי הכותרת — מתחיל באדום מימין (RTL) */
+  .petal-ribbon {
+    background: linear-gradient(
+      270deg,
+      rgb(var(--petal-red)),
+      rgb(var(--petal-orange)),
+      rgb(var(--petal-yellow)),
+      rgb(var(--petal-lime)),
+      rgb(var(--petal-green)),
+      rgb(var(--petal-teal)),
+      rgb(var(--petal-blue))
+    );
+  }
+
+  .petal-text {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--petal-red)),
+      rgb(var(--petal-orange)) 45%,
+      rgb(var(--petal-teal))
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* רקע "אורורה": כתמי צבע רכים של עלי הכותרת, קבועים מאחורי התוכן */
+  .aurora::before,
+  .aurora::after {
+    content: "";
+    position: fixed;
+    z-index: -1;
+    width: 46vmax;
+    height: 46vmax;
+    border-radius: 9999px;
+    filter: blur(90px);
+    opacity: 0.16;
+    pointer-events: none;
+  }
+  .aurora::before {
+    top: -18vmax;
+    right: -12vmax;
+    background: radial-gradient(circle, rgb(var(--petal-red)), rgb(var(--petal-orange)) 60%, transparent 70%);
+  }
+  .aurora::after {
+    bottom: -20vmax;
+    left: -14vmax;
+    background: radial-gradient(circle, rgb(var(--petal-teal)), rgb(var(--petal-green)) 60%, transparent 70%);
+  }
+
+  .glass {
+    background: rgb(var(--surface) / 0.78);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 0.35s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise {
+    animation: none;
+  }
+}
