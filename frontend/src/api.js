@@ -3,6 +3,7 @@
 // אסימון ההתחברות נשמר בדפדפן כדי לשחזר את החשבון עד שפג תוקף ה-session בשרת.
 const CODE_KEY = "access_code";
 const TOKEN_KEY = "employee_access_token";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 
 export function getSessionToken() {
   try {
@@ -41,7 +42,7 @@ export function setAccessCode(code) {
 async function request(path, options = {}) {
   const code = getAccessCode();
   const token = getSessionToken();
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE_URL}/api${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
