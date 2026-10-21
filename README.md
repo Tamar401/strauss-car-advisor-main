@@ -15,7 +15,7 @@
 # שרת (Python 3.12)
 cd backend
 pip install -r requirements.txt
-cp .env.example .env          # וממלאים GEMINI_API_KEY
+cp .env.example .env          # רק אם .env עדיין לא קיים; ממלאים GEMINI_API_KEY
 python -m uvicorn app.main:app --port 8000   # אחרי שינוי בקוד: לעצור ולהפעיל שוב (--reload נתקע אצלנו ב-Windows)
 python -m pytest -q            # בדיקות
 
@@ -25,7 +25,9 @@ npm install
 npm run dev                    # http://localhost:5173
 ```
 
-> **אזהרת פיתוח בלבד:** אם `REP_ACCESS_CODE` או `ADMIN_ACCESS_CODE` חסרים או ריקים ב-`.env`, מסך הנציג או מסך הכללים עשויים להיות נגישים ללא אימות. יש להגדיר את שניהם לפני כל שימוש מחוץ לפיתוח מקומי; ראו `docs/PRIVACY.md`.
+חשבונות העובדים, הנציגים והשיחות הפרטיות נשמרים ב-`data/app.db`. מנהל/ת נכנס/ת דרך `/admin/login` עם `ADMIN_USERNAME` ו-`ADMIN_PASSWORD`. במסך הניהול ניתן להנפיק לנציג/ה קוד הרשמה חד-פעמי, הקשור לכתובת הדוא״ל ותקף ל-24 שעות; הנציג/ה בוחר/ת סיסמה בהרשמה דרך `/rep/register`, ובהמשך מתחבר/ת דרך `/rep/login`. עובדים נרשמים בנפרד דרך `/employee/register` עם שם מלא, כתובת דוא״ל וסיסמה; ניתן להוסיף גם מספר טלפון. מנהל/ת אינו/ה יוצר/ת חשבונות עובדים. כללי המערכת נמצאים במסך הנפרד `/rules`, ושמירתם דורשת התחברות מנהל/ת. שאלות פתוחות משותפות לצוות, ורק הנציג/ה שענה/תה רואה את השאלה בהיסטוריית המענה שלו/ה. קוד `REP_ACCESS_CODE` נשאר לחיפוש כלי רכב.
+
+> **אזהרת פיתוח בלבד:** בלי `ADMIN_USERNAME` ו-`ADMIN_PASSWORD` לא ניתן להתחבר כמנהל/ת. אם `REP_ACCESS_CODE` חסר או ריק ב-`.env`, חיפוש כלי הרכב עשוי להיות נגיש ללא קוד. יש להגדיר את הפרטים לפני כל שימוש מחוץ לפיתוח מקומי; ראו `docs/PRIVACY.md`.
 
 ## מבנה
 
@@ -36,7 +38,7 @@ data/seed/                  JSON שיוצא מהאקסל: catalog, occupations, 
 backend/app/contracts.py    החוזים: מקור האמת למבני הנתונים
 backend/app/engine/         המנוע: rules (כללים) · vou (מאגר שווי שימוש) · eligibility · net · compare
 backend/app/agent/          הסוכן: orchestrator (לולאת Gemini) · tools · number_guard · prompts · rep_flow
-backend/app/store.py        שמירת שיחות ושאלות לנציג ב-SQLite (data/app.db)
+backend/app/store.py        חשבונות, sessions, שיחות ושאלות לנציג ב-SQLite (data/app.db)
 backend/app/api/            נתיבי ה-API (ראו docs/CONTRACTS.md)
 backend/scripts/            export_seed.py: אקסל → seed
 frontend/src/design/        מערכת העיצוב המשותפת (tokens + רכיבים), דוגמאות ב-/design

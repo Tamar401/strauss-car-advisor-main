@@ -7,21 +7,23 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.agent.rep_flow import apply_rep_answer
-from app.auth import require
+from app.auth import AuthenticatedUser, require_representative
 from app.contracts import RepAnswer, RepQuestion
 from app.engine import vou
 from app.store import get_store
 
-router = APIRouter(prefix="/api/rep", tags=["rep"], dependencies=[Depends(require("rep"))])
+router = APIRouter(prefix="/api/rep", tags=["rep"], dependencies=[Depends(require_representative)])
 
 
 @router.get("/questions", response_model=list[RepQuestion])
-def list_questions(status: str | None = None):
-    return get_store().questions(status=status)
+def list_questions(status: str | None = None, user: AuthenticatedUser = Depends(require_representative)):
+    return get_store().questions_for_representative(user.id, status=status)
 
 
 @router.post("/questions/{question_id}/answer", response_model=RepQuestion)
-def answer_question(question_id: str, answer: RepAnswer):
+def answer_question(
+    question_id: str, answer: RepAnswer, user: AuthenticatedUser = Depends(require_representative),
+):
     store = get_store()
     q = store.question(question_id)
     if q is None:
@@ -43,6 +45,7 @@ def answer_question(question_id: str, answer: RepAnswer):
     q.answer = answer
     q.status = "answered"
     q.answered_at = datetime.now(timezone.utc)
-    store.save_question(q)
+    if not store.answer_question(q, user.id):
+        raise HTTPException(409, "השאלה כבר נענתה על ידי נציג אחר.")
     apply_rep_answer(q, store)
     return q

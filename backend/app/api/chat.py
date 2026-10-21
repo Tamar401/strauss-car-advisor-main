@@ -3,13 +3,14 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from google.genai import types
 from pydantic import BaseModel
 
 from app import seed
 from app.agent.orchestrator import handle_message
 from app.agent.tools import PROFILE_NUMBERS, ToolError, missing_profile_fields, run_comparison, update_profile
+from app.auth import AuthenticatedUser, require_employee
 from app.contracts import ChatMessage, ChatRequest, CompareRequest, ConversationState, EmployeeProfile, Tracked
 from app.engine.compare import FIELD_NAMES, all_options, compare, demo_profile
 from app.store import ConversationRecord, get_store
@@ -17,32 +18,37 @@ from app.store import ConversationRecord, get_store
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
-def _get(conversation_id: str) -> ConversationRecord:
-    record = get_store().get(conversation_id)
+def _get(conversation_id: str, user_id: str) -> ConversationRecord:
+    record = get_store().get_owned(conversation_id, user_id)
     if record is None:
         raise HTTPException(404, "שיחה לא נמצאה")
     return record
 
 
 @router.post("/chat", response_model=ConversationState)
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, user: AuthenticatedUser = Depends(require_employee)):
     store = get_store()
     if not req.message.strip():
         raise HTTPException(400, "הודעה ריקה")
     if req.conversation_id is None:
         record = ConversationRecord(
-            state=ConversationState(conversation_id=uuid4().hex, status="collecting", messages=[], profile=EmployeeProfile())
+            state=ConversationState(
+                conversation_id=uuid4().hex,
+                status="collecting",
+                messages=[],
+                profile=store.get_profile(user.id) or EmployeeProfile(),
+            )
         )
     else:
-        record = _get(req.conversation_id)
+        record = _get(req.conversation_id, user.id)
     record = handle_message(record, req.message.strip()[:2000], store)
-    store.save(record)
+    store.save_owned(record, user.id)
     return record.state
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationState)
-def get_conversation(conversation_id: str):
-    return _get(conversation_id).state
+def get_conversation(conversation_id: str, user: AuthenticatedUser = Depends(require_employee)):
+    return _get(conversation_id, user.id).state
 
 
 class ProfileCorrection(BaseModel):
@@ -53,9 +59,11 @@ class ProfileCorrection(BaseModel):
 
 
 @router.patch("/conversations/{conversation_id}/profile", response_model=ConversationState)
-def correct_profile(conversation_id: str, body: ProfileCorrection):
+def correct_profile(
+    conversation_id: str, body: ProfileCorrection, user: AuthenticatedUser = Depends(require_employee),
+):
     store = get_store()
-    record = _get(conversation_id)
+    record = _get(conversation_id, user.id)
     allowed_fields = set(PROFILE_NUMBERS) | {"occupation", "children_under_23"}
     unknown = set(body.fields) - allowed_fields
     if unknown:
@@ -99,15 +107,15 @@ def correct_profile(conversation_id: str, body: ProfileCorrection):
         types.Content(role="user", parts=[types.Part(text=f"[הודעת מערכת: העובד/ת תיקן/ה בכרטיס הפרופיל: {', '.join(changes)}]")]).model_dump(mode="json", exclude_none=True)
     )
     record.history.append(types.Content(role="model", parts=[types.Part(text=text)]).model_dump(mode="json", exclude_none=True))
-    store.save(record)
+    store.save_owned(record, user.id)
     return record.state
 
 
 @router.post("/conversations/{conversation_id}/explore", response_model=ConversationState)
-def explore_all_options(conversation_id: str):
+def explore_all_options(conversation_id: str, user: AuthenticatedUser = Depends(require_employee)):
     """כל החלופות בבת אחת, מהמשתלמת ביותר. דטרמיניסטי — בלי מודל שפה, בלי מכסה."""
     store = get_store()
-    record = _get(conversation_id)
+    record = _get(conversation_id, user.id)
     missing = missing_profile_fields(record)
     if missing:
         names = ", ".join(FIELD_NAMES.get(m, m) for m in missing)
@@ -140,18 +148,25 @@ def explore_all_options(conversation_id: str):
     record.state.messages.append(
         ChatMessage(id=uuid4().hex, role="assistant", text=text, created_at=datetime.now(timezone.utc), comparison=comparison)
     )
-    store.save(record)
+    store.save_owned(record, user.id)
     return record.state
 
 
 @router.post("/conversations/{conversation_id}/demo/{employee_id}", response_model=ConversationState)
-def load_demo_employee(conversation_id: str, employee_id: str):
+def load_demo_employee(
+    conversation_id: str, employee_id: str, user: AuthenticatedUser = Depends(require_employee),
+):
     """ממלא את הפרופיל מאחד העובדים לדוגמה — כדי להדגים בלי להקליד את כל הנתונים."""
     store = get_store()
     employee = next((e for e in seed.employees() if e["id"] == employee_id), None)
     if employee is None:
         raise HTTPException(404, "עובד לדוגמה לא נמצא")
-    record = store.get(conversation_id) if conversation_id != "new" else None
+    if conversation_id == "new":
+        record = None
+    else:
+        record = store.get_owned(conversation_id, user.id)
+        if record is None:
+            raise HTTPException(404, "שיחה לא נמצאה")
     if record is None:
         record = ConversationRecord(
             state=ConversationState(conversation_id=uuid4().hex, status="collecting", messages=[], profile=EmployeeProfile())
@@ -164,5 +179,5 @@ def load_demo_employee(conversation_id: str, employee_id: str):
         text=f"נטענו נתוני הדמו של {employee['name']} ({employee['occupation']}). אפשר לשאול: {employee['question']}",
         created_at=datetime.now(timezone.utc),
     ))
-    store.save(record)
+    store.save_owned(record, user.id)
     return record.state

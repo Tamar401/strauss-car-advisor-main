@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "../api";
+import { useAuth } from "../auth";
 import ComparisonGrid from "../components/ComparisonGrid";
 import ProfileCard from "../components/ProfileCard";
 import { Button, Card, ChatBubble, Notice, PetalMark, SectionTitle } from "../design/components";
@@ -15,18 +16,22 @@ const STARTERS = [
   "יש לי 4 ילדים, מגיע לי רכב משפחתי?",
 ];
 
-function readStoredId() {
+function storageKey(userId) {
+  return `${STORAGE_KEY}:${userId}`;
+}
+
+function readStoredId(userId) {
   try {
-    return localStorage.getItem(STORAGE_KEY);
+    return localStorage.getItem(storageKey(userId));
   } catch {
     return null;
   }
 }
 
-function storeId(id) {
+function storeId(userId, id) {
   try {
-    if (id) localStorage.setItem(STORAGE_KEY, id);
-    else localStorage.removeItem(STORAGE_KEY);
+    if (id) localStorage.setItem(storageKey(userId), id);
+    else localStorage.removeItem(storageKey(userId));
   } catch {
     /* מצב פרטי — השיחה פשוט לא תשוחזר אחרי רענון */
   }
@@ -45,6 +50,7 @@ function TypingBubble() {
 }
 
 export default function EmployeePage() {
+  const { user } = useAuth();
   const [state, setState] = useState(null);
   const [text, setText] = useState("");
   const [pending, setPending] = useState(null); // ההודעה שנשלחה ועוד לא נענתה
@@ -57,11 +63,11 @@ export default function EmployeePage() {
   const busy = pending != null;
 
   useEffect(() => {
-    const id = readStoredId();
-    if (id) api.conversation(id).then(setState).catch(() => storeId(null));
+    const id = readStoredId(user.id);
+    if (id) api.conversation(id).then(setState).catch(() => storeId(user.id, null));
     api.catalog().then((cars) => setCatalog(Object.fromEntries(cars.map((c) => [c.id, c]))));
     api.demoEmployees().then(setDemos);
-  }, []);
+  }, [user.id]);
 
   // ממתינים לנציג: מושכים את השיחה כל כמה שניות, וכשהוא עונה — ההשוואה מתעדכנת לבד
   useEffect(() => {
@@ -85,7 +91,7 @@ export default function EmployeePage() {
     setError(null);
     try {
       const next = await api.chat(state?.conversation_id ?? null, clean);
-      storeId(next.conversation_id);
+      storeId(user.id, next.conversation_id);
       setState(next);
     } catch (err) {
       setError(err.message);
@@ -99,7 +105,7 @@ export default function EmployeePage() {
     setError(null);
     try {
       const next = await api.loadDemo(state?.conversation_id, employeeId);
-      storeId(next.conversation_id);
+      storeId(user.id, next.conversation_id);
       setState(next);
     } catch (err) {
       setError(err.message);
@@ -119,7 +125,7 @@ export default function EmployeePage() {
   }
 
   function reset() {
-    storeId(null);
+    storeId(user.id, null);
     setState(null);
     setExploreError(null);
   }

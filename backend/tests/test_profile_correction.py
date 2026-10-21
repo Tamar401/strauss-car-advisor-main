@@ -42,6 +42,27 @@ def test_correction_without_alternatives_just_saves(isolated):
     assert state["messages"][-1]["role"] == "system"
 
 
+def test_new_conversation_reuses_employee_profile(isolated, monkeypatch):
+    cid = demo_conversation(isolated, with_alternative=False)
+    updated = client.patch(
+        f"/api/conversations/{cid}/profile",
+        json={"fields": {"base_salary": 23456}},
+    ).json()
+    assert updated["profile"]["base_salary"]["value"] == 23456
+
+    # Background updates (for example, a representative identifying the current car) use Store.save.
+    record = isolated.get(cid)
+    record.state.profile.base_salary.value = 24567
+    isolated.save(record)
+
+    monkeypatch.setattr("app.api.chat.handle_message", lambda record, message, store: record)
+    new_state = client.post("/api/chat", json={"message": "שיחה חדשה"}).json()
+
+    assert new_state["conversation_id"] != cid
+    assert new_state["profile"]["base_salary"]["value"] == 24567
+    assert new_state["profile"]["occupation"] == updated["profile"]["occupation"]
+
+
 def test_correction_uses_the_same_validation_as_the_agent(isolated):
     cid = demo_conversation(isolated)
     assert client.patch(f"/api/conversations/{cid}/profile", json={"fields": {"occupation": "אסטרונאוט/ית"}}).status_code == 400
