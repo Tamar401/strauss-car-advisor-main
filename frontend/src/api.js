@@ -1,7 +1,25 @@
 // לקוח ה-API — מקביל לנתיבים ב-backend/app/api. כל המבנים מוגדרים ב-backend/app/contracts.py
 
-// קוד הגישה למסכי הנציג והכללים — נשמר רק ללשונית הנוכחית (sessionStorage), לא לתמיד
+// אסימון ההתחברות נשמר בדפדפן כדי לשחזר את החשבון עד שפג תוקף ה-session בשרת.
 const CODE_KEY = "access_code";
+const TOKEN_KEY = "employee_access_token";
+
+export function getSessionToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setSessionToken(token) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* Authentication cannot be persisted in private browsing mode. */
+  }
+}
 
 export function getAccessCode() {
   try {
@@ -22,9 +40,15 @@ export function setAccessCode(code) {
 
 async function request(path, options = {}) {
   const code = getAccessCode();
+  const token = getSessionToken();
   const res = await fetch(`/api${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...(code ? { "X-Access-Code": code } : {}), ...options.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(code ? { "X-Access-Code": code } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   if (!res.ok) {
@@ -39,6 +63,26 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  setEmployeePassword: (email, setupCode, password) =>
+    request("/auth/set-password", {
+      method: "POST",
+      body: { email, setup_code: setupCode, password },
+    }),
+  createRepresentativeActivation: (email) =>
+    request("/auth/representatives", { method: "POST", body: { email } }),
+  registerRepresentative: (email, password, registrationCode) =>
+    request("/auth/representatives/register", {
+      method: "POST",
+      body: { email, password, registration_code: registrationCode },
+    }),
+  registerEmployee: (email, password, fullName, mobileNumber) =>
+    request("/auth/employees/register", {
+      method: "POST",
+      body: { email, password, full_name: fullName, mobile_number: mobileNumber },
+    }),
+  login: (email, password) => request("/auth/login", { method: "POST", body: { email, password } }),
+  currentUser: () => request("/auth/me"),
+  logout: () => request("/auth/logout", { method: "POST" }),
   catalog: () => request("/catalog"),
   occupations: () => request("/occupations"),
   demoEmployees: () => request("/demo-employees"),

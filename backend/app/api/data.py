@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app import seed
 from app.agent.tools import vehicle_candidate
-from app.auth import allowed, require
+from app.auth import allowed, get_current_user, require, require_admin
 from app.contracts import Car, Occupation
 from app.engine import vou
 
@@ -34,10 +34,16 @@ def get_demo_employees():
 
 
 @router.get("/auth/check/{role}")
-def check_access(role: str, x_access_code: str | None = Header(default=None)):
-    """לממשק: האם הקוד שהוקלד פותח את המסך."""
+def check_access(
+    role: str,
+    x_access_code: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """לממשק: בדיקת קוד נציג או session של מנהל."""
     if role not in ("rep", "admin"):
         raise HTTPException(404)
-    if not allowed(role, x_access_code):
+    if role == "admin":
+        require_admin(get_current_user(authorization))
+    elif not allowed(role, x_access_code):
         raise HTTPException(401, "קוד גישה שגוי")
     return {"ok": True}

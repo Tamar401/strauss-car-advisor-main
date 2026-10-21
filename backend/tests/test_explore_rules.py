@@ -6,9 +6,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import seed
+from app.auth import get_current_user
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture
+def admin_headers(monkeypatch):
+    email = "admin@example.test"
+    password = "admin-password-123"
+    monkeypatch.setenv("ADMIN_USERNAME", email)
+    monkeypatch.setenv("ADMIN_PASSWORD", password)
+    app.dependency_overrides.pop(get_current_user, None)
+    response = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 @pytest.fixture
@@ -64,33 +80,39 @@ def test_explore_uses_known_participation_and_keeps_tracked_alternatives(isolate
 # ---------- כללים: תצוגת השפעה ----------
 
 
-def test_preview_without_changes_changes_nothing(rules_copy):
-    impact = client.post("/api/rules/preview", json={"rules": raw_rules()}).json()["impact"]
+def test_preview_without_changes_changes_nothing(rules_copy, admin_headers):
+    impact = client.post(
+        "/api/rules/preview", json={"rules": raw_rules()}, headers=admin_headers,
+    ).json()["impact"]
     assert len(impact) == 6
     assert not any(row["changed"] for row in impact)
     assert next(r for r in impact if r["employee_id"] == "E-001")["delta"] == 661
 
 
-def test_preview_budget_change_affects_only_family_track(rules_copy):
+def test_preview_budget_change_affects_only_family_track(rules_copy, admin_headers):
     raw = raw_rules()
     raw["budgets"]["ב"] = 6000  # מכסה את הקרניבל של דוד כהן (קבוצה ב)
-    impact = {r["employee_id"]: r for r in client.post("/api/rules/preview", json={"rules": raw}).json()["impact"]}
+    impact = {r["employee_id"]: r for r in client.post(
+        "/api/rules/preview", json={"rules": raw}, headers=admin_headers,
+    ).json()["impact"]}
     assert impact["E-002"]["changed"]
     assert impact["E-002"]["delta"] - impact["E-002"]["before"]["delta"] == 1150  # חלקו בפער נעלם
     assert not impact["E-001"]["changed"]
 
 
-def test_preview_electric_bonus_change(rules_copy):
+def test_preview_electric_bonus_change(rules_copy, admin_headers):
     raw = raw_rules()
     raw["electric"]["netBonus"] = 400
-    impact = {r["employee_id"]: r for r in client.post("/api/rules/preview", json={"rules": raw}).json()["impact"]}
+    impact = {r["employee_id"]: r for r in client.post(
+        "/api/rules/preview", json={"rules": raw}, headers=admin_headers,
+    ).json()["impact"]}
     assert impact["E-001"]["delta"] - impact["E-001"]["before"]["delta"] == 150
 
 
-def test_preview_rejects_invalid_rules_with_hebrew_message(rules_copy):
+def test_preview_rejects_invalid_rules_with_hebrew_message(rules_copy, admin_headers):
     raw = raw_rules()
     del raw["budgets"]["ד"]
-    r = client.post("/api/rules/preview", json={"rules": raw})
+    r = client.post("/api/rules/preview", json={"rules": raw}, headers=admin_headers)
     assert r.status_code == 422
     assert r.json()["detail"]["message"] == "קובץ הכללים לא תקין"
 
@@ -98,22 +120,22 @@ def test_preview_rejects_invalid_rules_with_hebrew_message(rules_copy):
 # ---------- כללים: שמירה וביטול ----------
 
 
-def test_save_applies_immediately_and_undo_restores(rules_copy):
+def test_save_applies_immediately_and_undo_restores(rules_copy, admin_headers):
     raw = raw_rules()
     raw["version"] = "test-v2"
     raw["electric"]["netBonus"] = 400
-    assert client.put("/api/rules", json={"rules": raw}).json()["saved"]
+    assert client.put("/api/rules", json={"rules": raw}, headers=admin_headers).json()["saved"]
     assert json.loads(rules_copy.read_text(encoding="utf-8"))["version"] == "test-v2"
     after = client.get("/api/demo/compare/E-001").json()
     assert after["rules_version"] == "test-v2"  # המנוע קורא את הקובץ החדש בלי הפעלה מחדש
 
-    assert client.post("/api/rules/undo").json()["version"] == "mock-2026-10-12"
-    assert client.post("/api/rules/undo").status_code == 404  # אין עוד גרסה קודמת
+    assert client.post("/api/rules/undo", headers=admin_headers).json()["version"] == "mock-2026-10-12"
+    assert client.post("/api/rules/undo", headers=admin_headers).status_code == 404  # אין עוד גרסה קודמת
 
 
-def test_save_rejects_invalid_and_keeps_file(rules_copy):
+def test_save_rejects_invalid_and_keeps_file(rules_copy, admin_headers):
     before = rules_copy.read_text(encoding="utf-8")
     raw = raw_rules()
     raw["netMethod"]["brackets"][0][0] = 99999
-    assert client.put("/api/rules", json={"rules": raw}).status_code == 422
+    assert client.put("/api/rules", json={"rules": raw}, headers=admin_headers).status_code == 422
     assert rules_copy.read_text(encoding="utf-8") == before

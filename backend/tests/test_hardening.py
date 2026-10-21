@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app import seed
 from app.agent import tools
+from app.auth import create_user_session, get_current_user, hash_password, require_representative
 from app.agent.number_guard import allowed_numbers, check, tokens
 from app.contracts import CompareRequest, ConversationState, EmployeeProfile, OptionRequest, Tracked
 from app.engine import vou
@@ -104,18 +105,32 @@ def codes(monkeypatch):
     monkeypatch.setenv("ADMIN_ACCESS_CODE", "admin-code")
 
 
-def test_rep_screen_requires_code(codes):
+def test_rep_questions_require_individual_representative_login(codes, isolated):
+    app.dependency_overrides.pop(require_representative, None)
+    app.dependency_overrides.pop(get_current_user, None)
     assert client.get("/api/rep/questions").status_code == 401
     assert client.get("/api/rep/questions", headers={"X-Access-Code": "wrong"}).status_code == 401
-    assert client.get("/api/rep/questions", headers={"X-Access-Code": "rep-code"}).status_code == 200
-    assert client.get("/api/rep/questions", headers={"X-Access-Code": "admin-code"}).status_code == 200  # מנהל/ת יכול/ה לענות
+    assert client.get("/api/rep/questions", headers={"X-Access-Code": "rep-code"}).status_code == 401
+    assert client.get("/api/rep/questions", headers={"X-Access-Code": "admin-code"}).status_code == 401
+    isolated.create_account("rep-1", "rep@example.test", hash_password("representative-password"), "rep")
+    token, _ = create_user_session("rep-1")
+    assert client.get("/api/rep/questions", headers={"Authorization": f"Bearer {token}"}).status_code == 200
 
 
-def test_rules_editing_requires_admin_code(codes):
+def test_rules_editing_requires_admin_session(monkeypatch, codes):
+    app.dependency_overrides.pop(get_current_user, None)
+    monkeypatch.setenv("ADMIN_USERNAME", "admin@example.test")
+    monkeypatch.setenv("ADMIN_PASSWORD", "admin-password-123")
     raw = client.get("/api/rules").json()  # קריאה פתוחה
     assert client.post("/api/rules/preview", json={"rules": raw}).status_code == 401
     assert client.post("/api/rules/preview", json={"rules": raw}, headers={"X-Access-Code": "rep-code"}).status_code == 401
-    assert client.post("/api/rules/preview", json={"rules": raw}, headers={"X-Access-Code": "admin-code"}).status_code == 200
+    assert client.post("/api/rules/preview", json={"rules": raw}, headers={"X-Access-Code": "admin-code"}).status_code == 401
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.test", "password": "admin-password-123"},
+    )
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert client.post("/api/rules/preview", json={"rules": raw}, headers=headers).status_code == 200
 
 
 def test_vehicle_search_requires_rep_code(codes):
@@ -125,8 +140,10 @@ def test_vehicle_search_requires_rep_code(codes):
 
 
 def test_access_check_endpoint(codes):
-    assert client.get("/api/auth/check/admin", headers={"X-Access-Code": "admin-code"}).status_code == 200
+    app.dependency_overrides.pop(get_current_user, None)
+    assert client.get("/api/auth/check/admin", headers={"X-Access-Code": "admin-code"}).status_code == 401
     assert client.get("/api/auth/check/admin", headers={"X-Access-Code": "rep-code"}).status_code == 401
+    assert client.get("/api/auth/check/rep", headers={"X-Access-Code": "rep-code"}).status_code == 200
 
 
 def test_employee_screens_stay_open(codes):

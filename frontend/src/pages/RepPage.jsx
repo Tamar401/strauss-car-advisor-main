@@ -150,6 +150,9 @@ export default function RepPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <SectionTitle hint={`${open.length} פתוחות`}>שאלות מעובדים</SectionTitle>
+      <p className="text-sm text-ink-soft">
+        שאלות פתוחות זמינות לצוות הנציגים. שאלות שנענו מוצגות כאן רק אם נענו על ידך.
+      </p>
       {questions.length === 0 && (
         <Card className="glass py-10 text-center text-sm text-ink-soft">
           אין שאלות כרגע. כשהבוט יצטרך מידע שהעובד לא יודע, השאלה תופיע כאן — והתשובה שלך תעדכן את השיחה של העובד מיד.

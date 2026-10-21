@@ -10,14 +10,19 @@
 | `GET /api/occupations` | אמיתי | משותף | `list[Occupation]` |
 | `GET /api/demo-employees` | אמיתי | משותף | 6 העובדים לדוגמה, בלי ת״ז |
 | `GET /api/rules` | אמיתי | ב' | קובץ הכללים |
-| `POST /api/rules/preview` | אמיתי | ב' | `{valid, version, impact}` ← ולידציה + ההשפעה על 6 העובדים לדוגמה (לפני/אחרי). לא שומר. על כללים לא תקינים מוחזר 422 עם `detail: {message, problems}` |
-| `PUT /api/rules` | אמיתי | ב' | שומר אחרי ולידציה; הגרסה הקודמת נשמרת ב-`config/history/`. ⚠️ בפיילוט: רק למנהלים מחוברים |
-| `POST /api/rules/undo` | אמיתי | ב' | משחזר את הגרסה האחרונה מההיסטוריה (404 אם אין) |
+| `POST /api/rules/preview` | אמיתי | ב' | `{valid, version, impact}` ← ולידציה + ההשפעה על 6 העובדים לדוגמה (לפני/אחרי). לא שומר. דורש session של מנהל/ת. על כללים לא תקינים מוחזר 422 עם `detail: {message, problems}` |
+| `PUT /api/rules` | אמיתי | ב' | שומר אחרי ולידציה; הגרסה הקודמת נשמרת ב-`config/history/`. דורש session של מנהל/ת |
+| `POST /api/rules/undo` | אמיתי | ב' | משחזר את הגרסה האחרונה מההיסטוריה (404 אם אין); דורש session של מנהל/ת |
+| `POST /api/auth/login` | אמיתי | משותף | כניסה עם דוא״ל וסיסמה; מחזיר session עם role |
+| `POST /api/auth/representatives` | אמיתי | מנהל/ת | מנפיק קוד הרשמה חד-פעמי לנציג/ה; הקוד קשור לדוא״ל ותקף ל-24 שעות |
+| `POST /api/auth/representatives/register` | אמיתי | הרשמה ציבורית | מפעיל חשבון נציג/ה רק עם קוד תקף; הנציג/ה בוחר/ת סיסמה בהרשמה |
+| `POST /api/auth/employees/register` | אמיתי | הרשמה ציבורית | יוצר חשבון עובד/ת עם דוא״ל, שם מלא וסיסמה; מספר טלפון אופציונלי |
+| `GET /api/auth/me`, `POST /api/auth/logout` | אמיתי | session | פרטי המשתמש המחובר/ת וביטול session |
 | `POST /api/conversations/{id}/explore` | אמיתי | א' | כל החלופות בבת אחת, בלי מודל שפה. 409 אם הפרופיל לא שלם |
 | `GET /api/vehicles/search?q=&year=` | אמיתי, **קוד נציג** | א' | חיפוש במאגר המלא — לזיהוי הרכב של היום |
 | `GET /api/auth/check/{rep\|admin}` | אמיתי | משותף | 200 אם הקוד בכותרת `X-Access-Code` פותח את המסך |
 
-**הרשאות:** `/api/rep/*` ו-`/api/vehicles/search` דורשים קוד נציג (או מנהל). `POST /api/rules/preview`, `PUT /api/rules`, `POST /api/rules/undo` דורשים קוד מנהל. קוד שלא הוגדר ב-`.env` = מצב פיתוח פתוח.
+**הרשאות:** ניהול נציגים וכללי המערכת דורשים session של מנהל/ת. חשבון נציג/ה ציבורי נוצר רק עם קוד הרשמה אקראי שהונפק על ידי מנהל/ת, קשור לדוא״ל, תקף ל-24 שעות ונמחק לאחר שימוש. הרשמת עובד/ת יוצרת role של עובד/ת בלבד ודורשת שם מלא, דוא״ל וסיסמה; היא אינה מקבלת role מהלקוח. אין endpoint ליצירת עובד/ת דרך מסך הניהול. `/api/rep/*` ו-`/api/vehicles/search` ממשיכים להשתמש בהרשאות הנציג הקיימות.
 
 **רכב מחוץ לקטלוג:** `OptionRequest` עם `vou_key` (ובלי `car_id`) — רק כמצב היום. כחלופה הוא `blocked` עם `not_in_catalog`. רכב בלי שניהם = "טרם זוהה": המצב היום `partial` עם `missing=["current_vehicle"]`, ושאלה לנציג מסוג `current_vehicle` (התשובה: מפתח מהמאגר, לא טקסט חופשי).
 | `POST /api/compare` | אמיתי | א' | `CompareResponse` (400 על רכב לא מוכר) |

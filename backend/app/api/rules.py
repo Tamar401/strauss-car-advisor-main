@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ValidationError
 
 from app import seed
-from app.auth import require
+from app.auth import require_admin
 from app.contracts import CompareRequest
 from app.engine.compare import compare, demo_profile, demo_question_option
 from app.engine.rules import Rules, load_rules
@@ -59,7 +59,7 @@ def get_rules():
     return seed.rules()
 
 
-@router.post("/preview", dependencies=[Depends(require("admin"))])
+@router.post("/preview", dependencies=[Depends(require_admin)])
 def preview(body: RulesBody):
     """מה ישתנה ל-6 העובדים לדוגמה אם נשמור את הכללים האלה. לא שומר כלום."""
     proposed = _validate(body.rules)
@@ -78,7 +78,7 @@ def preview(body: RulesBody):
     return {"valid": True, "version": proposed.version, "impact": rows}
 
 
-@router.put("", dependencies=[Depends(require("admin"))])
+@router.put("", dependencies=[Depends(require_admin)])
 def save(body: RulesBody):
     _validate(body.rules)
     history = _history()
@@ -92,7 +92,7 @@ def save(body: RulesBody):
     return {"saved": True, "version": body.rules.get("version"), "backup": backup.name}
 
 
-@router.post("/undo", dependencies=[Depends(require("admin"))])
+@router.post("/undo", dependencies=[Depends(require_admin)])
 def undo():
     """מחזיר את הגרסה האחרונה שנשמרה לפני השינוי."""
     history = _history()

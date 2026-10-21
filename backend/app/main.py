@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat, compare, data, rep, rules
+from app.api import accounts, chat, compare, data, rep, rules
 from app.store import get_store
 
 log = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for module in (data, compare, chat, rep, rules):
+for module in (accounts, data, compare, chat, rep, rules):
     app.include_router(module.router)
 
 
