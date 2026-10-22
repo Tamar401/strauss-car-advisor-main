@@ -76,7 +76,7 @@ function Shell() {
             </div>
           </NavLink>
           <nav className="flex max-w-full gap-1 overflow-x-auto rounded-full bg-muted/80 p-1">
-            {NAV.map((n) => (
+            {NAV.filter((n) => !["/admin", "/rules"].includes(n.to) || user?.role === "admin").map((n) => (
               <NavLink
                 key={n.to}
                 to={n.to}
