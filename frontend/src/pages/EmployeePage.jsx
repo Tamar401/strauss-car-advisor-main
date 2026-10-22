@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import ComparisonGrid from "../components/ComparisonGrid";
+import PayslipReview from "../components/PayslipReview";
 import ProfileCard from "../components/ProfileCard";
 import { Button, Card, ChatBubble, Notice, PetalMark, SectionTitle } from "../design/components";
 
@@ -59,8 +60,14 @@ export default function EmployeePage() {
   const [demos, setDemos] = useState([]);
   const [exploring, setExploring] = useState(false);
   const [exploreError, setExploreError] = useState(null);
+  const [payslipDraft, setPayslipDraft] = useState(null);
+  const [payslipError, setPayslipError] = useState(null);
+  const [payslipBusy, setPayslipBusy] = useState(false);
+  const [payslipSaving, setPayslipSaving] = useState(false);
+  const [payslipConsent, setPayslipConsent] = useState(false);
+  const fileInput = useRef(null);
   const endRef = useRef(null);
-  const busy = pending != null;
+  const busy = pending != null || payslipBusy;
 
   useEffect(() => {
     const id = readStoredId(user.id);
@@ -124,10 +131,47 @@ export default function EmployeePage() {
     }
   }
 
+  async function extractPayslip(file) {
+    if (!file) return;
+    setPayslipError(null);
+    if (file.size > 10 * 1024 * 1024) {
+      setPayslipError("גודל התלוש המרבי הוא 10 MB.");
+      return;
+    }
+    setPayslipBusy(true);
+    try {
+      const extraction = await api.extractPayslip(file, state?.conversation_id, payslipConsent);
+      storeId(user.id, extraction.conversation_id);
+      const next = await api.conversation(extraction.conversation_id);
+      setState(next);
+      setPayslipDraft(extraction);
+    } catch (err) {
+      setPayslipError(err.message);
+    } finally {
+      setPayslipBusy(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+
+  async function confirmPayslip(fields) {
+    setPayslipSaving(true);
+    setPayslipError(null);
+    try {
+      setState(await api.confirmPayslip(payslipDraft.conversation_id, fields));
+      setPayslipDraft(null);
+    } catch (err) {
+      setPayslipError(err.message);
+    } finally {
+      setPayslipSaving(false);
+    }
+  }
+
   function reset() {
     storeId(user.id, null);
     setState(null);
     setExploreError(null);
+    setPayslipDraft(null);
+    setPayslipError(null);
   }
 
   // ההשוואה האחרונה שצורפה להודעה — כך הכרטיסים תמיד תואמים למה שהבוט אמר
@@ -160,7 +204,7 @@ export default function EmployeePage() {
                 </div>
               </div>
             </div>
-            <Button variant="ghost" onClick={reset}>
+            <Button variant="ghost" onClick={reset} disabled={busy}>
               שיחה חדשה
             </Button>
           </div>
@@ -223,6 +267,24 @@ export default function EmployeePage() {
             className="flex gap-2 border-t border-border/70 p-3"
           >
             <input
+              ref={fileInput}
+              type="file"
+              accept="application/pdf,image/jpeg,image/png,image/webp"
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={(event) => extractPayslip(event.target.files?.[0])}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => fileInput.current?.click()}
+              disabled={!payslipConsent || busy}
+              className="shrink-0 px-3"
+            >
+              {payslipBusy ? "קורא…" : "העלאת תלוש"}
+            </Button>
+            <input
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="כתבו כאן…"
@@ -233,8 +295,18 @@ export default function EmployeePage() {
             </Button>
           </form>
           {error && <div className="px-5 pb-3 text-sm text-down">{error}</div>}
+          <label className="flex items-start gap-2 px-5 pb-2 text-xs leading-relaxed text-ink-soft">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-brand"
+              checked={payslipConsent}
+              onChange={(event) => setPayslipConsent(event.target.checked)}
+            />
+            <span>אני מאשר/ת לשלוח את התלוש לשירות ה-AI שהוגדר בשרת לצורך חילוץ. הקובץ לא נשמר ביישום; לפני שמירת נתונים בפרופיל אבדוק ואאשר אותם.</span>
+          </label>
+          {payslipError && <div role="alert" className="px-5 pb-2 text-sm text-down">{payslipError}</div>}
           <p className="px-5 pb-3 text-[11px] leading-snug text-ink-soft">
-            🔒 אין צורך בתעודת זהות. נתוני השכר משמשים רק לחישוב, והשיחה נמחקת אוטומטית אחרי 30 יום. החישוב עצמו מתבצע בשרת לפי כללי החברה.
+            אין צורך בתעודת זהות. נתוני השכר משמשים לחישוב, והשיחה נמחקת אוטומטית אחרי 30 יום. למסמכי שכר אמיתיים יש להגדיר Vertex AI ולפעול לפי מדיניות הפרטיות הארגונית.
           </p>
         </Card>
 
@@ -272,6 +344,18 @@ export default function EmployeePage() {
           </div>
         </div>
       </div>
+      {payslipDraft && (
+        <PayslipReview
+          extraction={payslipDraft}
+          saving={payslipSaving}
+          error={payslipError}
+          onConfirm={confirmPayslip}
+          onCancel={() => {
+            setPayslipDraft(null);
+            setPayslipError(null);
+          }}
+        />
+      )}
     </div>
   );
 }

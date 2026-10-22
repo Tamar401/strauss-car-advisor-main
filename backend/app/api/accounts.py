@@ -29,12 +29,29 @@ class Credentials(BaseModel):
 
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128)
+    role: str | None = Field(default=None, pattern="^(employee|rep|admin)$")
 
 
 class RepresentativeActivationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: str = Field(min_length=3, max_length=254)
+
+
+class EmployeeActivationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=254)
+    full_name: str = Field(min_length=1, max_length=100)
+    mobile_number: str | None = Field(default=None, max_length=32)
+
+    @field_validator("full_name")
+    @classmethod
+    def require_full_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Full name is required.")
+        return value
 
 
 class RepresentativeRegistration(Credentials):
@@ -88,6 +105,12 @@ class RepresentativeActivationResponse(BaseModel):
     expires_at: datetime
 
 
+class EmployeeActivationResponse(BaseModel):
+    email: str
+    setup_code: str
+    expires_at: datetime
+
+
 def _new_session(
     user_id: str,
     email: str,
@@ -132,6 +155,40 @@ def create_representative_activation(request: RepresentativeActivationRequest):
         registration_code=registration_code,
         expires_at=expires_at,
     )
+
+
+@router.post(
+    "/employees/activation",
+    response_model=EmployeeActivationResponse,
+    status_code=201,
+    dependencies=[Depends(require_admin)],
+)
+def create_employee_activation(request: EmployeeActivationRequest):
+    email = normalize_email(request.email)
+    full_name = request.full_name
+    mobile_number = (request.mobile_number or "").strip() or None
+    store = get_store()
+    existing = store.user_by_email(email)
+    if existing and (existing["role"] != "employee" or existing["password_hash"] != "pending"):
+        raise HTTPException(409, "An active account with this email already exists.")
+
+    setup_code = f"{secrets.randbelow(100_000):05d}"
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    setup_hash = hashlib.sha256(setup_code.encode("ascii")).hexdigest()
+    if existing:
+        created = store.reissue_employee_setup_code(email, setup_hash, expires_at.isoformat())
+    else:
+        created = store.create_pending_employee(
+            uuid4().hex,
+            email,
+            setup_hash,
+            full_name,
+            mobile_number,
+            expires_at.isoformat(),
+        )
+    if not created:
+        raise HTTPException(409, "Could not create an employee activation code.")
+    return EmployeeActivationResponse(email=email, setup_code=setup_code, expires_at=expires_at)
 
 
 @router.post(
@@ -207,17 +264,28 @@ def login(credentials: Credentials):
     email = normalize_email(credentials.email)
     configured_username = os.environ.get("ADMIN_USERNAME", "")
     admin_password = os.environ.get("ADMIN_PASSWORD", "")
-    if bool(configured_username) != bool(admin_password) or (admin_password and len(admin_password) < 12):
-        raise HTTPException(503, "Configure both ADMIN_USERNAME and an ADMIN_PASSWORD of at least 12 characters.")
-    if configured_username and admin_password:
-        admin_username = normalize_email(configured_username)
-    else:
-        admin_username = ""
-    if admin_username and hmac.compare_digest(email, admin_username):
-        if hmac.compare_digest(credentials.password.encode("utf-8"), admin_password.encode("utf-8")):
-            if not get_store().upsert_admin_account(email, hash_password(admin_password)):
-                raise HTTPException(409, "The administrator username is already assigned to another account.")
-            return _new_session("system-admin", email, "admin")
+    if credentials.role == "admin" or (configured_username and email.lower() == configured_username.strip().lower()):
+        if not configured_username or not admin_password or len(admin_password) < 12:
+            if credentials.role == "admin":
+                raise HTTPException(503, "Configure ADMIN_USERNAME as an email and ADMIN_PASSWORD with at least 12 characters.")
+        else:
+            try:
+                admin_username = normalize_email(configured_username)
+            except HTTPException as exc:
+                if credentials.role == "admin":
+                    raise HTTPException(503, "ADMIN_USERNAME must be a valid email address.") from exc
+                admin_username = ""
+            if credentials.role == "admin" and email != admin_username:
+                raise HTTPException(401, "Invalid administrator email or password.")
+            if admin_username and email == admin_username:
+                if hmac.compare_digest(credentials.password.encode("utf-8"), admin_password.encode("utf-8")):
+                    if not get_store().upsert_admin_account(email, hash_password(admin_password)):
+                        raise HTTPException(409, "The administrator username is already assigned to another account.")
+                    return _new_session("system-admin", email, "admin")
+                if credentials.role == "admin":
+                    raise HTTPException(401, "Invalid administrator email or password.")
+    elif credentials.role == "admin":
+        raise HTTPException(401, "Invalid administrator email or password.")
     user = get_store().user_by_email(email)
     if user is None or user["role"] == "admin" or user["password_hash"] == "pending" or not verify_password(credentials.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password.")
