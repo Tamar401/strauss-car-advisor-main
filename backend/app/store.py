@@ -1,9 +1,11 @@
-"""שמירת שיחות ושאלות לנציג ב-SQLite (data/app.db) — שורד רענון וגם הפעלה מחדש של השרת.
+"""שמירת שיחות ושאלות לנציג — שורד רענון וגם הפעלה מחדש של השרת.
 
+ברירת מחדל: SQLite (data/app.db). כש-DATABASE_URL מוגדר: PostgreSQL — לשרת שהדיסק שלו זמני (Render).
 כל רשומה נשמרת כ-JSON של מודל Pydantic. פשוט, ומספיק לפיילוט של עשרות שיחות במקביל.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 import time
@@ -15,7 +17,109 @@ from pydantic import BaseModel, Field
 from app.contracts import ConversationState, EmployeeProfile, OptionRequest, RepQuestion, Tracked
 from app.seed import ROOT
 
+try:
+    import psycopg
+except ImportError:  # psycopg נדרש רק כש-DATABASE_URL מוגדר
+    psycopg = None
+
 DB_PATH = ROOT / "data" / "app.db"
+_INTEGRITY_ERRORS = (sqlite3.IntegrityError,) + ((psycopg.IntegrityError,) if psycopg else ())
+
+POSTGRES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL, owner_id TEXT
+);
+CREATE TABLE IF NOT EXISTS employee_profiles (
+    owner_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rep_questions (
+    id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, status TEXT NOT NULL,
+    created_at TEXT NOT NULL, data TEXT NOT NULL, answered_by TEXT
+);
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY, email TEXT NOT NULL,
+    password_hash TEXT NOT NULL, created_at TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'employee',
+    full_name TEXT, mobile_number TEXT, password_setup_hash TEXT,
+    password_setup_expires_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (lower(email));
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS employee_setup_attempts (
+    email TEXT NOT NULL, client_ip TEXT NOT NULL,
+    attempts INTEGER NOT NULL, window_started_at DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (email, client_ip)
+);
+CREATE TABLE IF NOT EXISTS representative_activation_codes (
+    code_hash TEXT PRIMARY KEY, email TEXT NOT NULL,
+    expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_questions_status ON rep_questions (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_questions_conversation ON rep_questions (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations (updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations (owner_id);
+"""
+
+
+class _PostgresConnection:
+    """עוטף את psycopg בממשק של sqlite3 ש-Store משתמש בו: execute עם '?', ו-`with` כטרנזקציה.
+
+    חיבור אחד עם נעילה: מספיק לפיילוט, ומתחבר מחדש אם השרת ניתק חיבור שעמד בטל.
+    """
+
+    def __init__(self, url: str):
+        if psycopg is None:
+            raise RuntimeError("DATABASE_URL מוגדר אבל psycopg לא מותקן (pip install -r requirements.txt)")
+        self._url = url
+        self._lock = threading.RLock()
+        self._conn = None
+        self._tx = None
+        self._depth = 0
+
+    def _connection(self):
+        if self._conn is None or self._conn.closed or self._conn.broken:
+            self._conn = psycopg.connect(self._url, autocommit=True)
+        return self._conn
+
+    def execute(self, sql: str, params=()):
+        with self._lock:
+            try:
+                return self._connection().execute(sql.replace("?", "%s"), params)
+            except psycopg.OperationalError:
+                if self._tx is not None:
+                    raise
+                self._conn = None  # חיבור שנותק — ניסיון אחד נוסף על חיבור חדש
+                return self._connection().execute(sql.replace("?", "%s"), params)
+
+    def executemany(self, sql: str, seq):
+        with self._lock:
+            cursor = self._connection().cursor()
+            cursor.executemany(sql.replace("?", "%s"), list(seq))
+            return cursor
+
+    def executescript(self, script: str) -> None:
+        with self._lock:
+            self._connection().execute(script)
+
+    def __enter__(self):
+        self._lock.acquire()
+        if self._depth == 0:
+            self._tx = self._connection().transaction()
+            self._tx.__enter__()
+        self._depth += 1
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            self._depth -= 1
+            if self._depth == 0:
+                tx, self._tx = self._tx, None
+                tx.__exit__(*exc)
+        finally:
+            self._lock.release()
+        return False
 
 
 class ConversationRecord(BaseModel):
@@ -29,8 +133,12 @@ class ConversationRecord(BaseModel):
 
 
 class Store:
-    def __init__(self, path: Path = DB_PATH):
+    def __init__(self, path: Path = DB_PATH, url: str | None = None):
         self._lock = threading.Lock()
+        if url:
+            self._con = _PostgresConnection(url)
+            self._con.executescript(POSTGRES_SCHEMA)
+            return
         self._con = sqlite3.connect(path, check_same_thread=False, timeout=10)
         self._con.executescript(
             """
@@ -209,14 +317,14 @@ class Store:
                     (user_id, email, password_hash, _now(), role, full_name, mobile_number),
                 )
             return True
-        except sqlite3.IntegrityError:
+        except _INTEGRITY_ERRORS:
             return False
 
     def create_representative_activation(self, email: str, code_hash: str, expires_at: str) -> None:
         with self._lock, self._con:
             self._con.execute(
                 """DELETE FROM representative_activation_codes
-                WHERE email = ? COLLATE NOCASE""",
+                WHERE lower(email) = lower(?)""",
                 (email,),
             )
             self._con.execute(
@@ -259,7 +367,7 @@ class Store:
                     )
                 return "invalid"
             if self._con.execute(
-                "SELECT 1 FROM users WHERE email = ? COLLATE NOCASE",
+                "SELECT 1 FROM users WHERE lower(email) = lower(?)",
                 (email,),
             ).fetchone():
                 return "exists"
@@ -270,7 +378,7 @@ class Store:
                     VALUES (?, ?, ?, ?, 'rep')""",
                     (user_id, email, password_hash, now),
                 )
-            except sqlite3.IntegrityError:
+            except _INTEGRITY_ERRORS:
                 return "exists"
             self._con.execute(
                 "DELETE FROM representative_activation_codes WHERE code_hash = ?",
@@ -297,7 +405,7 @@ class Store:
                     (user_id, email, _now(), full_name, mobile_number, setup_code_hash, setup_expires_at),
                 )
             return True
-        except sqlite3.IntegrityError:
+        except _INTEGRITY_ERRORS:
             return False
 
     def reissue_employee_setup_code(
@@ -306,13 +414,13 @@ class Store:
         with self._lock, self._con:
             cursor = self._con.execute(
                 """UPDATE users SET password_setup_hash = ?, password_setup_expires_at = ?
-                WHERE email = ? COLLATE NOCASE AND role = 'employee'
+                WHERE lower(email) = lower(?) AND role = 'employee'
                     AND password_hash = 'pending'""",
                 (setup_code_hash, setup_expires_at, email),
             )
             if cursor.rowcount:
                 self._con.execute(
-                    "DELETE FROM employee_setup_attempts WHERE email = ? COLLATE NOCASE",
+                    "DELETE FROM employee_setup_attempts WHERE lower(email) = lower(?)",
                     (email,),
                 )
             return cursor.rowcount == 1
@@ -321,7 +429,7 @@ class Store:
         with self._lock, self._con:
             row = self._con.execute(
                 """SELECT id FROM users
-                WHERE email = ? COLLATE NOCASE AND role = 'employee'
+                WHERE lower(email) = lower(?) AND role = 'employee'
                     AND password_setup_hash = ? AND password_hash = 'pending'
                     AND password_setup_expires_at > ?""",
                 (email, setup_code_hash, _now()),
@@ -339,7 +447,7 @@ class Store:
     def employee_setup_valid(self, email: str, setup_code_hash: str) -> bool:
         row = self._con.execute(
             """SELECT 1 FROM users
-            WHERE email = ? COLLATE NOCASE AND role = 'employee'
+            WHERE lower(email) = lower(?) AND role = 'employee'
                 AND password_setup_hash = ? AND password_hash = 'pending'
                 AND password_setup_expires_at > ?""",
             (email, setup_code_hash, _now()),
@@ -361,7 +469,7 @@ class Store:
             )
             row = self._con.execute(
                 """SELECT attempts, window_started_at FROM employee_setup_attempts
-                WHERE email = ? COLLATE NOCASE AND client_ip = ?""",
+                WHERE lower(email) = lower(?) AND client_ip = ?""",
                 (email, client_ip),
             ).fetchone()
             if row is None:
@@ -381,7 +489,7 @@ class Store:
                 (now - window_seconds,),
             )
             pending = self._con.execute(
-                """SELECT 1 FROM users WHERE email = ? COLLATE NOCASE
+                """SELECT 1 FROM users WHERE lower(email) = lower(?)
                 AND role = 'employee' AND password_hash = 'pending'""",
                 (email,),
             ).fetchone()
@@ -389,7 +497,7 @@ class Store:
                 return
             row = self._con.execute(
                 """SELECT attempts, window_started_at FROM employee_setup_attempts
-                WHERE email = ? COLLATE NOCASE AND client_ip = ?""",
+                WHERE lower(email) = lower(?) AND client_ip = ?""",
                 (email, client_ip),
             ).fetchone()
             if row is None or now - row[1] >= window_seconds:
@@ -403,7 +511,7 @@ class Store:
             else:
                 self._con.execute(
                     """UPDATE employee_setup_attempts SET attempts = attempts + 1
-                    WHERE email = ? COLLATE NOCASE AND client_ip = ?""",
+                    WHERE lower(email) = lower(?) AND client_ip = ?""",
                     (email, client_ip),
                 )
 
@@ -411,7 +519,7 @@ class Store:
         with self._lock, self._con:
             self._con.execute(
                 """DELETE FROM employee_setup_attempts
-                WHERE email = ? COLLATE NOCASE AND client_ip = ?""",
+                WHERE lower(email) = lower(?) AND client_ip = ?""",
                 (email, client_ip),
             )
 
@@ -427,14 +535,14 @@ class Store:
                     (email, password_hash, _now()),
                 )
             return True
-        except sqlite3.IntegrityError:
+        except _INTEGRITY_ERRORS:
             return False
 
     def user_by_email(self, email: str) -> dict | None:
         row = self._con.execute(
             """SELECT id, email, password_hash, role, full_name, mobile_number,
                 password_setup_hash, password_setup_expires_at
-            FROM users WHERE email = ? COLLATE NOCASE""",
+            FROM users WHERE lower(email) = lower(?)""",
             (email,),
         ).fetchone()
         return {
@@ -527,7 +635,7 @@ _store: Store | None = None
 def get_store() -> Store:
     global _store
     if _store is None:
-        _store = Store()
+        _store = Store(url=os.environ.get("DATABASE_URL") or None)
     return _store
 
 

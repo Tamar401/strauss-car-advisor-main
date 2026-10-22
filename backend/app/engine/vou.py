@@ -84,6 +84,10 @@ def _connection() -> sqlite3.Connection:
     return con
 
 
+def lookup_ready() -> None:
+    _connection()
+
+
 def lookup(key: VouKey) -> dict | None:
     row = _connection().execute(
         f"SELECT * FROM vou WHERE {' AND '.join(f'{k} = ?' for k in KEY)}",
