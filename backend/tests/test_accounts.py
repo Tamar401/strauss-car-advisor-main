@@ -1,4 +1,4 @@
-"""Authentication, role permissions, invitation-only registration, and account isolation."""
+"""Authentication, role permissions, registration and rep invitations, and account isolation."""
 import hashlib
 from datetime import datetime, timezone
 
@@ -51,69 +51,91 @@ def test_admin_login_rejects_invalid_server_username_configuration(monkeypatch, 
     assert "email" in response.json()["detail"]
 
 
-def invite(headers, role="employee", email="employee@example.test", full_name="Employee Person"):
+def invite(headers, email="rep@example.test", full_name="Rep Person"):
+    return client.post("/api/auth/invitations", headers=headers, json={"email": email, "full_name": full_name})
+
+
+def register_rep(email, code, password="account-password-12"):
     return client.post(
-        "/api/auth/invitations",
-        headers=headers,
-        json={"role": role, "email": email, "full_name": full_name},
+        "/api/auth/representatives/register",
+        json={"email": email, "code": code, "password": password},
     )
 
 
-def register(role, email, code, password="account-password-12"):
+def register_employee(email="employee@example.test", full_name="Employee Person"):
     return client.post(
-        "/api/auth/register",
-        json={"role": role, "email": email, "code": code, "password": password},
+        "/api/auth/employees/register",
+        json={"email": email, "password": "account-password-12", "full_name": full_name},
     )
 
 
-def invited_account(monkeypatch, role="employee", email="employee@example.test"):
-    """הזמנה מהמנהל/ת והרשמה — כך נפתח כל חשבון עובד/ת או נציג/ה."""
+def rep_account(monkeypatch, email="rep@example.test"):
     admin = auth_headers(admin_session(monkeypatch))
-    code = invite(admin, role, email).json()["code"]
-    registered = register(role, email, code)
+    registered = register_rep(email, invite(admin, email).json()["code"])
     assert registered.status_code == 201
     return registered.json()
 
 
-def test_admin_invites_employee_and_rep_who_register_with_code(monkeypatch, isolated):
-    admin = auth_headers(admin_session(monkeypatch))
-    for role, email in (("employee", "new.employee@example.test"), ("rep", "new.rep@example.test")):
-        issued = invite(admin, role, email, "New Person")
-        assert issued.status_code == 201
-        code = issued.json()["code"]
-        assert len(code) == 5 and code.isdigit()
-        saved = isolated.user_by_email(email)
-        assert saved["role"] == role and saved["password_hash"] == "pending"
-        assert saved["password_setup_hash"] == hashlib.sha256(code.encode("ascii")).hexdigest()
-        assert client.post("/api/auth/login", json={"email": email, "password": "account-password-12"}).status_code == 401
+def test_employee_registers_without_code(isolated):
+    assert client.post(
+        "/api/auth/employees/register",
+        json={"email": "missing-name@example.test", "password": "account-password-12"},
+    ).status_code == 422
+    assert client.post(
+        "/api/auth/employees/register",
+        json={"email": "blank@example.test", "password": "account-password-12", "full_name": "   "},
+    ).status_code == 422
+    registered = register_employee()
+    assert registered.status_code == 201
+    assert registered.json()["user"]["role"] == "employee"
+    assert registered.json()["user"]["full_name"] == "Employee Person"
+    assert isolated.user_by_email("employee@example.test")["password_hash"] != "account-password-12"
+    login = client.post("/api/auth/login", json={"email": "EMPLOYEE@example.test", "password": "account-password-12"})
+    assert login.status_code == 200 and login.json()["user"]["role"] == "employee"
+    assert register_employee().status_code == 409
+    assert client.post(
+        "/api/auth/employees/register",
+        json={"email": "boss@example.test", "password": "account-password-12", "full_name": "Boss", "role": "admin"},
+    ).status_code == 422
 
-        registered = register(role, email.upper(), code)
-        assert registered.status_code == 201
-        assert registered.json()["user"]["role"] == role
-        assert registered.json()["user"]["full_name"] == "New Person"
-        assert isolated.user_by_email(email)["password_hash"] != "account-password-12"
-        login = client.post("/api/auth/login", json={"email": email, "password": "account-password-12"})
-        assert login.status_code == 200 and login.json()["user"]["role"] == role
-        assert register(role, email, code, "another-password-12").status_code == 401  # הקוד חד-פעמי
-        assert invite(admin, role, email).status_code == 409  # כבר יש חשבון פעיל
+
+def test_admin_invites_rep_who_registers_with_code(monkeypatch, isolated):
+    admin = auth_headers(admin_session(monkeypatch))
+    issued = invite(admin, "new.rep@example.test", "New Rep")
+    assert issued.status_code == 201
+    code = issued.json()["code"]
+    assert len(code) == 5 and code.isdigit()
+    saved = isolated.user_by_email("new.rep@example.test")
+    assert saved["role"] == "rep" and saved["password_hash"] == "pending"
+    assert saved["password_setup_hash"] == hashlib.sha256(code.encode("ascii")).hexdigest()
+    assert client.post(
+        "/api/auth/login", json={"email": "new.rep@example.test", "password": "account-password-12"},
+    ).status_code == 401
+
+    assert register_rep("other@example.test", code).status_code == 401
+    registered = register_rep("NEW.REP@example.test", code)
+    assert registered.status_code == 201
+    assert registered.json()["user"]["role"] == "rep"
+    assert registered.json()["user"]["full_name"] == "New Rep"
+    login = client.post("/api/auth/login", json={"email": "new.rep@example.test", "password": "account-password-12"})
+    assert login.status_code == 200 and login.json()["user"]["role"] == "rep"
+    assert register_rep("new.rep@example.test", code, "another-password-12").status_code == 401  # חד-פעמי
+    assert invite(admin, "new.rep@example.test").status_code == 409
 
 
 def test_reinvite_replaces_code(monkeypatch, isolated):
     admin = auth_headers(admin_session(monkeypatch))
-    first = invite(admin, "rep", "pending.rep@example.test").json()["code"]
-    second = invite(admin, "rep", "pending.rep@example.test").json()["code"]
+    first = invite(admin, "pending.rep@example.test").json()["code"]
+    second = invite(admin, "pending.rep@example.test").json()["code"]
     if first != second:
-        assert register("rep", "pending.rep@example.test", first).status_code == 401
-    assert register("rep", "pending.rep@example.test", second).status_code == 201
+        assert register_rep("pending.rep@example.test", first).status_code == 401
+    assert register_rep("pending.rep@example.test", second).status_code == 201
 
 
-def test_code_only_works_for_its_role_and_email(monkeypatch, isolated):
+def test_employee_cannot_become_rep_with_invitation(monkeypatch, isolated):
     admin = auth_headers(admin_session(monkeypatch))
-    code = invite(admin, "employee", "role@example.test").json()["code"]
-    assert register("rep", "role@example.test", code).status_code == 409
-    assert register("employee", "other@example.test", code).status_code == 401
-    assert invite(admin, "rep", "role@example.test").status_code == 409  # הזמנה לתפקיד אחר באותו דוא״ל
-    assert register("employee", "role@example.test", code).status_code == 201
+    register_employee("worker@example.test")
+    assert invite(admin, "worker@example.test").status_code == 409
 
 
 def test_expired_code_is_rejected(isolated):
@@ -122,48 +144,57 @@ def test_expired_code_is_rejected(isolated):
         "expired-user", "expired@example.test", "rep",
         hashlib.sha256(code.encode("ascii")).hexdigest(), "2000-01-01T00:00:00+00:00", "Expired",
     ) == "created"
-    assert register("rep", "expired@example.test", code).status_code == 401
+    assert register_rep("expired@example.test", code).status_code == 401
 
 
-def test_registration_attempts_are_rate_limited(isolated):
+def test_rep_registration_attempts_are_rate_limited(isolated):
     code = "54321"
     isolated.create_invitation(
-        "limited-user", "limited@example.test", "employee",
+        "limited-user", "limited@example.test", "rep",
         hashlib.sha256(code.encode("ascii")).hexdigest(), "2999-01-01T00:00:00+00:00", "Limited",
     )
     for _ in range(10):
-        assert register("employee", "limited@example.test", "12345").status_code == 401
-    assert register("employee", "limited@example.test", code).status_code == 429
+        assert register_rep("limited@example.test", "12345").status_code == 401
+    assert register_rep("limited@example.test", code).status_code == 429
 
 
-def test_no_open_self_registration(isolated):
-    """אין הרשמה בלי קוד מהמנהל/ת, ואי אפשר להזמין או להירשם כמנהל/ת."""
-    for path in ("/api/auth/employees/register", "/api/auth/representatives/register", "/api/auth/set-password"):
-        assert client.post(path, json={}).status_code == 404
-    assert client.post(
-        "/api/auth/register",
-        json={"role": "admin", "email": "x@example.test", "code": "12345", "password": "account-password-12"},
-    ).status_code == 422
-    assert client.post("/api/auth/register", json={"role": "employee", "email": "x@example.test"}).status_code == 422
+def test_demo_rep_is_created_at_startup(monkeypatch, isolated):
+    """חשבון נציג/ה להדגמה נוצר בכל עלייה — הנתונים ב-Render נמחקים בכל פריסה."""
+    monkeypatch.setenv("DEMO_REP_EMAIL", "Demo.Rep@example.test")
+    monkeypatch.setenv("DEMO_REP_PASSWORD", "demo-rep-password")
+    with TestClient(app):
+        pass
+    login = client.post("/api/auth/login", json={"email": "demo.rep@example.test", "password": "demo-rep-password"})
+    assert login.status_code == 200 and login.json()["user"]["role"] == "rep"
+
+
+def test_demo_rep_skipped_when_misconfigured(monkeypatch, isolated):
+    monkeypatch.setenv("DEMO_REP_EMAIL", "not-an-email")
+    monkeypatch.setenv("DEMO_REP_PASSWORD", "demo-rep-password")
+    with TestClient(app):  # השרת עולה גם עם הגדרה שגויה
+        pass
+    monkeypatch.setenv("DEMO_REP_EMAIL", "short@example.test")
+    monkeypatch.setenv("DEMO_REP_PASSWORD", "short")
+    with TestClient(app):
+        pass
+    assert isolated.user_by_email("short@example.test") is None
 
 
 def test_only_admin_can_invite_and_change_rules(monkeypatch, isolated):
-    admin = auth_headers(admin_session(monkeypatch))
-    assert invite(admin, "admin", "boss@example.test").status_code == 422
-    employee = invited_account(monkeypatch, "employee", "rules-employee@example.test")
-    rep = invited_account(monkeypatch, "rep", "rules-rep@example.test")
-    assert invite({}, "employee", "blocked@example.test").status_code == 401
+    admin_session(monkeypatch)
+    employee = register_employee("rules-employee@example.test").json()
+    rep = rep_account(monkeypatch, "rules-rep@example.test")
+    assert invite({}, "blocked@example.test").status_code == 401
     for session in (employee, rep):
-        assert invite(auth_headers(session), "employee", "blocked@example.test").status_code == 403
-        assert invite(auth_headers(session), "rep", "blocked@example.test").status_code == 403
+        assert invite(auth_headers(session), "blocked@example.test").status_code == 403
         assert client.post("/api/rules/preview", headers=auth_headers(session), json={"rules": {}}).status_code == 403
     assert isolated.user_by_email("blocked@example.test") is None
 
 
-def test_employee_conversations_remain_private(monkeypatch, isolated):
+def test_employee_conversations_remain_private(isolated):
     app.dependency_overrides.pop(get_current_user, None)
-    first = invited_account(monkeypatch, "employee", "first@example.test")
-    second = invited_account(monkeypatch, "employee", "second@example.test")
+    first = register_employee("first@example.test").json()
+    second = register_employee("second@example.test").json()
     first_headers = auth_headers(first)
     second_headers = auth_headers(second)
     created = client.post("/api/conversations/new/demo/E-001", headers=first_headers)

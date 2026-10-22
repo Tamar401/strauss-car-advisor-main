@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.agent.payslip import PayslipFields, extract_payslip
-from app.auth import get_current_user, hash_password
+from app.auth import get_current_user
 from app.main import app
 
 client = TestClient(app)
@@ -99,12 +99,13 @@ def test_payslip_upload_requires_consent():
 
 def test_payslip_confirmation_rejects_unapproved_fields(isolated):
     app.dependency_overrides.pop(get_current_user, None)
-    assert isolated.create_account(
-        "payslip-employee", "payslip.employee@example.test", hash_password("employee-password-12"), "employee",
-    )
     registered = client.post(
-        "/api/auth/login",
-        json={"email": "payslip.employee@example.test", "password": "employee-password-12"},
+        "/api/auth/employees/register",
+        json={
+            "email": "payslip.employee@example.test",
+            "password": "employee-password-12",
+            "full_name": "Payslip Employee",
+        },
     ).json()
     conversation = client.post(
         "/api/conversations/new/demo/E-001",

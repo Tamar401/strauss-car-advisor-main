@@ -41,9 +41,13 @@ def test_missing_participation_goes_to_rep_and_conversation_resumes(llm):
     assert round(meanwhile["current"]["net"]) == 11032
     assert meanwhile["alternatives"][0]["status"] == "partial"
 
+    assert meanwhile["alternatives"][0]["break_even_participation"] > 300  # נקודת האיזון כבר בזמן ההמתנה
+    assert "משתלם לך כל עוד" in meanwhile["alternatives"][0]["explanation"]
+
     q = client.get("/api/rep/questions", params={"status": "open"}).json()[0]
     assert q["employee_display_name"] == "נועה"
     assert "קבוצה ג" in q["context"]
+    assert "משתלם לעובד עד השתתפות של" in q["context"]  # הנציג/ה רואה את הגבול
     client.post(f"/api/rep/questions/{q['id']}/answer", json={"value": 300, "effective_from": "2027-01-01"})
 
     resumed = client.get(f"/api/conversations/{cid}").json()

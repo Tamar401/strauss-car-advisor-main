@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import math
+
 from app import seed
 from app.contracts import (
     CompareRequest,
@@ -313,12 +315,38 @@ def _explain(cur: OptionResult, alt: OptionResult | None, rules: Rules) -> str:
     return f"{line1}\n{_why(cur, alt, rules)}."
 
 
+def _break_even(option: OptionRequest, alt: OptionResult, current: OptionResult, ctx: "_Context") -> float | None:
+    """נקודת האיזון: ההשתתפות המרבית שבה החלופה עדיין לא מורידה את הנטו מתחת להיום.
+
+    ההשתתפות יורדת מהנטו בלבד, שקל מול שקל (לא משנה מס, ביטוח לאומי או את גילום החשמל), ולכן
+    נקודת האיזון מדויקת: הנטו בחלופה בלי השתתפות, פחות הנטו היום. לא ניחוש של ההשתתפות — גבול.
+    """
+    if option.kind != "car" or current.status != "complete":
+        return None
+    if alt.status == "complete":
+        return alt.delta_net + alt.employee_participation
+    if alt.status == "partial" and alt.missing == ["participation"]:
+        zero = Tracked(value=0.0, source="employee", confirmed=True)
+        free, _ = _evaluate(option.model_copy(update={"participation": zero}), ctx, is_current=False)
+        if free.status == "complete":
+            return free.net - current.net
+    return None
+
+
+def _break_even_text(b: float) -> str:
+    if b <= 0:
+        return "גם בלי השתתפות בכלל, הנטו ברכב הזה נמוך מהיום."
+    return f"הרכב הזה משתלם לך כל עוד ההשתתפות שלך בו עד {_f(math.floor(b))} ₪ בחודש."
+
+
 def _missing_text(missing: list[str]) -> str:
     return ", ".join(FIELD_NAMES.get(m, m) for m in missing)
 
 
 def _explain_missing(r: OptionResult) -> str:
     if r.missing == ["participation"]:
+        if r.break_even_participation is not None:
+            return f"חסר לי סכום ההשתתפות שלך ברכב הזה, ושאלתי את נציג התחבורה.\nבינתיים: {_break_even_text(r.break_even_participation)}"
         return "חסר לי סכום ההשתתפות שלך ברכב הזה, ושאלתי את נציג התחבורה.\nההשוואה תתעדכן ברגע שתגיע תשובה."
     return f"כדי לחשב חסר לי: {_missing_text(r.missing)}.\nאני לא מנחש — ברגע שהנתון יגיע, החישוב יתעדכן."
 
@@ -349,6 +377,7 @@ def compare(req: CompareRequest, rules: Rules | None = None) -> CompareResponse:
             alt.delta_net = alt.net - current.net
             alt.delta_display = round(alt.net) - round(current.net)
             alt.waterfall = _waterfall(current, alt)
+        alt.break_even_participation = _break_even(option, alt, current, ctx)
         alt.explanation = _explain(current, alt, rules)
         alternatives.append(alt)
 

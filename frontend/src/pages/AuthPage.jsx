@@ -5,7 +5,7 @@ import { api, setSessionToken } from "../api";
 import { useAuth } from "../auth";
 import { Button, Card, Input, PetalMark } from "../design/components";
 
-// כל החשבונות בהזמנה בלבד: המנהל/ת מנפיק/ה קוד בן 5 ספרות, והעובד/ת או הנציג/ה נרשמים איתו
+// עובדים נרשמים לבד. נציגים רואים את השאלות של כל העובדים, ולכן נרשמים רק עם קוד מהמנהל/ת
 const ROLES = {
   employee: {
     title: "עובד/ת",
@@ -13,6 +13,7 @@ const ROLES = {
     pitch: "כמה ישתנה הנטו שלי אם אחליף רכב, אעבור לחשמלי או אוותר על הרכב?",
     login: "/login",
     register: "/employee/register",
+    registerLabel: "הרשמה",
     home: "/employee",
   },
   rep: {
@@ -21,12 +22,13 @@ const ROLES = {
     pitch: "מענה לשאלות פתוחות של עובדים. השיחה שלהם ממשיכה מאותה נקודה.",
     login: "/rep/login",
     register: "/rep/register",
+    registerLabel: "הרשמה עם קוד",
     home: "/rep",
   },
   admin: {
     title: "מנהל/ת",
     icon: "⚙️",
-    pitch: "הזמנת עובדים ונציגים, וניהול כללי המערכת.",
+    pitch: "הזמנת נציגי תחבורה וניהול כללי המערכת.",
     login: "/admin/login",
     home: "/admin",
   },
@@ -51,7 +53,7 @@ function Welcome() {
       <div className="text-center">
         <PetalMark size={56} className="mx-auto" />
         <h1 className="mt-4 font-display text-3xl font-bold sm:text-4xl">ברוכים הבאים ליועץ הרכב</h1>
-        <p className="mt-2 text-ink-soft">בחרו איך אתם נכנסים. ההרשמה נעשית עם קוד שמקבלים מהמנהל/ת.</p>
+        <p className="mt-2 text-ink-soft">בחרו איך אתם נכנסים. נציגי תחבורה נרשמים עם קוד שמקבלים מהמנהל/ת.</p>
       </div>
       <div className="mt-8 grid gap-5 md:grid-cols-3">
         {Object.entries(ROLES).map(([role, r]) => (
@@ -67,7 +69,7 @@ function Welcome() {
               <Button className="w-full" onClick={() => navigate(r.login)}>כניסה</Button>
               {r.register && (
                 <Button variant="secondary" className="w-full" onClick={() => navigate(r.register)}>
-                  הרשמה עם קוד
+                  {r.registerLabel}
                 </Button>
               )}
             </div>
@@ -116,8 +118,10 @@ function errorText(err, register, role) {
   }
   if (register) {
     if (err.status === 401) return "הקוד אינו תקף, פג תוקפו או שכבר נוצל. ודאו שהדוא״ל זהה לזה שבהזמנה, או בקשו מהמנהל/ת קוד חדש.";
-    if (err.status === 409) return role === "rep" ? "הקוד הזה הונפק לעובד/ת. הירשמו בעמוד הרשמת העובדים." : "הקוד הזה הונפק לנציג/ה. הירשמו בעמוד הרשמת הנציגים.";
-    if (err.status === 422) return "בדקו את הדוא״ל, הקוד (5 ספרות) ובחרו סיסמה באורך 12 תווים לפחות.";
+    if (err.status === 409) return "כבר קיים חשבון עם הדוא״ל הזה. אפשר להיכנס איתו.";
+    if (err.status === 422) return role === "rep"
+      ? "בדקו את הדוא״ל, הקוד (5 ספרות) ובחרו סיסמה באורך 12 תווים לפחות."
+      : "בדקו את השם והדוא״ל, ובחרו סיסמה באורך 12 תווים לפחות.";
     if (err.status === 429) return "יותר מדי ניסיונות. נסו שוב בעוד 15 דקות.";
   }
   if (err.status === 401) return "פרטי הכניסה אינם נכונים. בדקו את הדוא״ל והסיסמה ונסו שוב.";
@@ -128,6 +132,8 @@ export default function AuthPage({ mode }) {
   const { user, checking, establishSession } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [mobile, setMobile] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -148,9 +154,11 @@ export default function AuthPage({ mode }) {
     setError("");
     setPending(true);
     try {
-      const session = register
-        ? await api.register(role, email, code, password)
-        : await api.login(email, password, role === "admin" ? "admin" : undefined);
+      const session = !register
+        ? await api.login(email, password, role === "admin" ? "admin" : undefined)
+        : role === "rep"
+          ? await api.registerRep(email, code, password)
+          : await api.registerEmployee(email, password, fullName, mobile);
       if (session.user.role !== role) {
         // הכניסה הצליחה אבל לתפקיד אחר — סוגרים את ה-session בשרת בלי להיכנס, ומפנים לעמוד הנכון
         setSessionToken(session.access_token);
@@ -182,12 +190,24 @@ export default function AuthPage({ mode }) {
             {register ? "הרשמה" : "כניסה"} · {r.title}
           </h1>
           <p className="mt-1 text-sm text-ink-soft">
-            {register
-              ? "הזינו את הדוא״ל שאליו נשלחה ההזמנה ואת הקוד בן 5 הספרות שקיבלתם מהמנהל/ת, ובחרו סיסמה."
-              : "התחברו עם הדוא״ל והסיסמה שלכם."}
+            {!register
+              ? "התחברו עם הדוא״ל והסיסמה שלכם."
+              : role === "rep"
+                ? "הזינו את הדוא״ל שאליו נשלחה ההזמנה ואת הקוד בן 5 הספרות שקיבלתם מהמנהל/ת, ובחרו סיסמה."
+                : "פותחים חשבון בדקה, ואחר כך מתחילים לשאול."}
           </p>
         </div>
         <form onSubmit={submit} className="mt-6 space-y-4">
+          {register && role === "employee" && (
+            <Input
+              label="שם מלא"
+              autoComplete="name"
+              required
+              maxLength={100}
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
+          )}
           <Input
             label="דוא״ל"
             type="email"
@@ -197,7 +217,18 @@ export default function AuthPage({ mode }) {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-          {register && (
+          {register && role === "employee" && (
+            <Input
+              label="מספר טלפון (לא חובה)"
+              type="tel"
+              autoComplete="tel"
+              dir="ltr"
+              maxLength={32}
+              value={mobile}
+              onChange={(event) => setMobile(event.target.value)}
+            />
+          )}
+          {register && role === "rep" && (
             <Input
               label="קוד הרשמה"
               type="text"
@@ -220,9 +251,9 @@ export default function AuthPage({ mode }) {
         <div className="mt-5 space-y-2 text-center text-sm text-ink-soft">
           {r.register && (
             <p>
-              {register ? "כבר נרשמתם? " : "קיבלתם קוד מהמנהל/ת? "}
+              {register ? "כבר נרשמתם? " : role === "rep" ? "קיבלתם קוד מהמנהל/ת? " : "עוד אין לכם חשבון? "}
               <Link className="font-medium text-brand underline" to={register ? r.login : r.register}>
-                {register ? "כניסה" : "הרשמה עם קוד"}
+                {register ? "כניסה" : r.registerLabel}
               </Link>
             </p>
           )}
