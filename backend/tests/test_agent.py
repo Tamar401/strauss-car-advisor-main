@@ -5,8 +5,7 @@ from google.genai import errors as genai_errors
 from app.agent.number_guard import check, numbers_in
 from app.agent.orchestrator import ERROR_TEXT, FALLBACK_TEXT
 from app.main import app
-from app.store import use_store
-from tests.conftest import make_store
+from app.store import Store, use_store
 
 client = TestClient(app)
 
@@ -195,7 +194,7 @@ def test_llm_failure_keeps_conversation(llm, isolated):
 def test_conversation_survives_server_restart(llm, isolated, tmp_path):
     llm.script = [PROFILE_CALLS, "קיבלתי."]
     cid = say("הנתונים שלי")["conversation_id"]
-    use_store(make_store(tmp_path))  # "הפעלה מחדש": חיבור חדש לאותו קובץ
+    use_store(Store(tmp_path / "app.db"))  # "הפעלה מחדש": חיבור חדש לאותו קובץ
     restored = client.get(f"/api/conversations/{cid}").json()
     assert len(restored["messages"]) == 2
     assert restored["profile"]["credit_points"]["value"] == 2.75
