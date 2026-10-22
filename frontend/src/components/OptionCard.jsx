@@ -1,5 +1,6 @@
 // כרטיס חלופה — בעלות: מפתחת א'. כולל את גרף המפל ואת ה"קבלה" הנפתחת.
 import { Card, Delta, DRIVE, DriveTag, Money, StatusBadge } from "../design/components";
+import BreakEven from "./BreakEven";
 import NetWaterfall from "./NetWaterfall";
 import OptionFacts from "./OptionFacts";
 import Receipt from "./Receipt";
@@ -39,6 +40,8 @@ export default function OptionCard({ result, current, isCurrent = false, receipt
       <p className="mt-4 whitespace-pre-line border-t border-border/70 pt-3 text-sm leading-relaxed text-ink-soft">
         {result.explanation}
       </p>
+
+      {!isCurrent && !blocked && <BreakEven result={result} />}
 
       <OptionFacts result={result} isCurrent={isCurrent} />
 

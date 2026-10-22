@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -311,8 +312,14 @@ def ask_rep(
     if profile.occupation.value:
         group = _occupations()[profile.occupation.value]["group"]
     context = f"קבוצה {group or '?'} · היום: {current_text}"
+    if car_id in catalog and not any(a.car_id == car_id for a in record.alternatives):
+        record.alternatives.append(OptionRequest(kind="car", car_id=car_id))
+    meanwhile = run_comparison(record) if record.alternatives else None
     if car_id in catalog:
         context += f" · מבוקש: {catalog[car_id]['model']} ({catalog[car_id]['registration_year']})"
+        asked = next((a for a in meanwhile.alternatives if a.option.car_id == car_id), None) if meanwhile else None
+        if asked and asked.break_even_participation is not None and asked.break_even_participation > 0:
+            context += f" · משתלם לעובד עד השתתפות של {math.floor(asked.break_even_participation):,} ₪"
     q = RepQuestion(
         id=uuid4().hex[:10],
         conversation_id=record.state.conversation_id,
@@ -327,10 +334,8 @@ def ask_rep(
     record.state.status = "waiting_for_rep"
     result = {"sent": True, "question_id": q.id}
     # בינתיים: השוואה חלקית — המצב היום מחושב, והחלופה תתעדכן כשהנציג יענה
-    if car_id in catalog and not any(a.car_id == car_id for a in record.alternatives):
-        record.alternatives.append(OptionRequest(kind="car", car_id=car_id))
-    if record.alternatives:
-        result["comparison_meanwhile"] = summarize(run_comparison(record))
+    if meanwhile:
+        result["comparison_meanwhile"] = summarize(meanwhile)
     return result
 
 
@@ -372,6 +377,9 @@ def summarize(resp: CompareResponse) -> dict:
             out["eligible"] = r.eligibility.eligible
             if r.delta_display is not None:
                 out["delta"] = r.delta_display
+            if r.break_even_participation is not None:
+                # עד כמה ההשתתפות יכולה להגיע בלי שהנטו ירד מתחת להיום (מעוגל כלפי מטה, לצד הבטוח)
+                out["break_even_participation"] = math.floor(r.break_even_participation)
         if r.missing:
             out["missing"] = r.missing
         return out

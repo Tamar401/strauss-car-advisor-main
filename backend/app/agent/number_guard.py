@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import math
 import re
 
 from app.contracts import CompareResponse, OptionResult
@@ -79,8 +80,10 @@ def _result_numbers(r: OptionResult) -> set[float]:
         r.budget, r.monthly_cost, r.employee_participation, r.family_gap_employee, r.value_of_use,
         r.electric_bonus_gross, r.maintenance, r.gross, r.taxable_income, r.income_tax,
         r.national_insurance, r.health_tax, r.pension_employee, r.study_fund_employee, r.net,
-        r.delta_net, r.delta_display,
+        r.delta_net, r.delta_display, r.break_even_participation,
     }
+    if r.break_even_participation is not None:
+        values.add(math.floor(r.break_even_participation))
     values |= {t.amount for t in r.trace}
     values |= {s.amount for s in r.waterfall}
     if r.national_insurance is not None and r.health_tax is not None:

@@ -170,6 +170,9 @@ class OptionResult(BaseModel):
     delta_net: Optional[float] = None  # מול המצב היום, מדויק; None במצב הנוכחי עצמו. סכום ה-waterfall שווה לו
     # ההפרש כפי שמוצג: נטו מעוגל פחות נטו מעוגל — כך שהמספרים על המסך תמיד מסתדרים (כמו בגיליון הייחוס)
     delta_display: Optional[int] = None
+    # נקודת האיזון: ההשתתפות החודשית המרבית ברכב הזה שבה הנטו עדיין לא יורד מתחת להיום.
+    # מחושבת גם כשההשתתפות עצמה חסרה (ממתינים לנציג). שלילית = גם בלי השתתפות הנטו נמוך מהיום
+    break_even_participation: Optional[float] = None
 
     explanation: str  # שתי שורות בעברית פשוטה, נבנה מה-trace
     trace: list[TraceLine] = []
