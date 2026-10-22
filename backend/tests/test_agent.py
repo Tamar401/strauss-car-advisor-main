@@ -5,7 +5,8 @@ from google.genai import errors as genai_errors
 from app.agent.number_guard import check, numbers_in
 from app.agent.orchestrator import ERROR_TEXT, FALLBACK_TEXT
 from app.main import app
-from app.store import Store, use_store
+from app.store import use_store
+from tests.conftest import make_store
 
 client = TestClient(app)
 
@@ -96,6 +97,43 @@ def test_compare_attaches_comparison_and_skips_current_car(llm):
     assert state["messages"][-1]["text"].startswith("הנטו עולה ב-661")
 
 
+# ---------- עובדת מקבוצה ב שרוצה לוותר על הרכב (טיפ מהנחיות האתגר) ----------
+
+
+def _group_b_waiver(llm, occupation):
+    llm.script = [
+        [("update_profile", {"name": "מאיה", "occupation": occupation, "base_salary": 13000, "commissions": 0,
+                             "bonus": 0, "pension_pct": 6, "study_fund_pct": 2.5, "credit_points": 2.25}),
+         ("set_current_situation", {"kind": "car", "car_id": "CAR-07", "participation": 0})],
+        [("compare_options", {"options": [{"kind": "waiver"}]})],
+        "הנה ההשוואה.",
+    ]
+    state = say("אני בקבוצה ב ורוצה לוותר על הרכב")
+    return state, state["messages"][-1]["comparison"]
+
+
+def test_group_b_waiver_allowed_gets_maintenance_instead_of_car(llm):
+    state, comparison = _group_b_waiver(llm, "אנליסט/ית נתונים")
+    current, alt = comparison["current"], comparison["alternatives"][0]
+    trace = {t["key"]: t["amount"] for t in alt["trace"]}
+
+    assert state["status"] == "ready"
+    assert alt["status"] == "complete"
+    assert alt["eligibility"]["eligible"] and alt["eligibility"]["reason_code"] == "waiver_allowed"
+    assert trace["maintenance"] == 1500  # מטבלת העיסוקים
+    assert trace["value_of_use"] == 0  # בלי רכב אין שווי שימוש
+    assert next(t for t in current["trace"] if t["key"] == "value_of_use")["amount"] > 0
+    assert alt["delta_display"] == round(alt["net"]) - round(current["net"])
+
+
+def test_group_b_waiver_refused_when_car_is_part_of_the_job(llm):
+    _, comparison = _group_b_waiver(llm, "נציג/ת מכירות שטח")
+    alt = comparison["alternatives"][0]
+    assert alt["eligibility"]["eligible"] is False
+    assert alt["eligibility"]["reason_code"] == "waiver_not_allowed"
+    assert alt.get("net") is None  # לא זכאי — לא מציגים נטו
+
+
 def test_tool_errors_are_returned_to_the_model_not_raised(llm):
     llm.script = [[("update_profile", {"occupation": "אסטרונאוט/ית"})], "באיזה עיסוק את/ה עובד/ת?"]
     state = say("אני אסטרונאוטית")
@@ -157,7 +195,7 @@ def test_llm_failure_keeps_conversation(llm, isolated):
 def test_conversation_survives_server_restart(llm, isolated, tmp_path):
     llm.script = [PROFILE_CALLS, "קיבלתי."]
     cid = say("הנתונים שלי")["conversation_id"]
-    use_store(Store(tmp_path / "app.db"))  # "הפעלה מחדש": חיבור חדש לאותו קובץ
+    use_store(make_store(tmp_path))  # "הפעלה מחדש": חיבור חדש לאותו קובץ
     restored = client.get(f"/api/conversations/{cid}").json()
     assert len(restored["messages"]) == 2
     assert restored["profile"]["credit_points"]["value"] == 2.75
