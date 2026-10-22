@@ -60,10 +60,6 @@ class Store:
                 attempts INTEGER NOT NULL, window_started_at REAL NOT NULL,
                 PRIMARY KEY (email, client_ip)
             );
-            CREATE TABLE IF NOT EXISTS representative_activation_codes (
-                code_hash TEXT PRIMARY KEY, email TEXT NOT NULL COLLATE NOCASE,
-                expires_at TEXT NOT NULL, created_at TEXT NOT NULL
-            );
             CREATE INDEX IF NOT EXISTS idx_questions_status ON rep_questions (status, created_at);
             CREATE INDEX IF NOT EXISTS idx_questions_conversation ON rep_questions (conversation_id);
             CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations (updated_at);
@@ -177,18 +173,6 @@ class Store:
         record.state.pending_questions = self.questions(conversation_id=conversation_id, status="open")
         return record
 
-    def create_user(
-        self,
-        user_id: str,
-        email: str,
-        password_hash: str,
-        full_name: str | None = None,
-        mobile_number: str | None = None,
-    ) -> bool:
-        return self.create_account(
-            user_id, email, password_hash, "employee", full_name, mobile_number,
-        )
-
     def create_account(
         self,
         user_id: str,
@@ -212,119 +196,73 @@ class Store:
         except sqlite3.IntegrityError:
             return False
 
-    def create_representative_activation(self, email: str, code_hash: str, expires_at: str) -> None:
-        with self._lock, self._con:
-            self._con.execute(
-                """DELETE FROM representative_activation_codes
-                WHERE email = ? COLLATE NOCASE""",
-                (email,),
-            )
-            self._con.execute(
-                """INSERT INTO representative_activation_codes
-                (code_hash, email, expires_at, created_at) VALUES (?, ?, ?, ?)""",
-                (code_hash, email, expires_at, _now()),
-            )
+    # ---------- הזמנות: המנהל/ת מנפיק/ה קוד, העובד/ת או הנציג/ה נרשמים איתו ----------
 
-    def representative_activation_valid(self, email: str, code_hash: str) -> bool:
-        row = self._con.execute(
-            """SELECT email, expires_at FROM representative_activation_codes
-            WHERE code_hash = ?""",
-            (code_hash,),
-        ).fetchone()
-        return bool(
-            row
-            and row[0].lower() == email.lower()
-            and row[1] > _now()
-        )
-
-    def activate_representative(
+    def create_invitation(
         self,
         user_id: str,
         email: str,
-        password_hash: str,
+        role: str,
         code_hash: str,
-    ) -> str:
-        now = _now()
-        with self._lock, self._con:
-            activation = self._con.execute(
-                """SELECT email, expires_at FROM representative_activation_codes
-                WHERE code_hash = ?""",
-                (code_hash,),
-            ).fetchone()
-            if activation is None or activation[0].lower() != email.lower() or activation[1] <= now:
-                if activation is not None and activation[1] <= now:
-                    self._con.execute(
-                        "DELETE FROM representative_activation_codes WHERE code_hash = ?",
-                        (code_hash,),
-                    )
-                return "invalid"
-            if self._con.execute(
-                "SELECT 1 FROM users WHERE email = ? COLLATE NOCASE",
-                (email,),
-            ).fetchone():
-                return "exists"
-            try:
-                self._con.execute(
-                    """INSERT INTO users
-                    (id, email, password_hash, created_at, role)
-                    VALUES (?, ?, ?, ?, 'rep')""",
-                    (user_id, email, password_hash, now),
-                )
-            except sqlite3.IntegrityError:
-                return "exists"
-            self._con.execute(
-                "DELETE FROM representative_activation_codes WHERE code_hash = ?",
-                (code_hash,),
-            )
-            return "created"
-
-    def create_pending_employee(
-        self,
-        user_id: str,
-        email: str,
-        setup_code_hash: str,
+        expires_at: str,
         full_name: str | None = None,
         mobile_number: str | None = None,
-        setup_expires_at: str | None = None,
-    ) -> bool:
-        try:
-            with self._lock, self._con:
+    ) -> str:
+        """חשבון ממתין עם קוד. הזמנה חוזרת לאותו דוא״ל מחליפה את הקוד הקודם.
+
+        מחזיר "created", או "exists" אם כבר יש חשבון פעיל או הזמנה לתפקיד אחר בדוא״ל הזה.
+        """
+        if role not in {"employee", "rep"}:
+            raise ValueError("Invitations are limited to employee and representative roles.")
+        with self._lock, self._con:
+            row = self._con.execute(
+                "SELECT role, password_hash FROM users WHERE lower(email) = lower(?)",
+                (email,),
+            ).fetchone()
+            if row is not None:
+                if row[0] != role or row[1] != "pending":
+                    return "exists"
+                self._con.execute(
+                    """UPDATE users SET password_setup_hash = ?, password_setup_expires_at = ?,
+                        full_name = ?, mobile_number = ?
+                    WHERE lower(email) = lower(?)""",
+                    (code_hash, expires_at, full_name, mobile_number, email),
+                )
+                self._con.execute(
+                    "DELETE FROM employee_setup_attempts WHERE lower(email) = lower(?)",
+                    (email,),
+                )
+                return "created"
+            try:
                 self._con.execute(
                     """INSERT INTO users
                     (id, email, password_hash, created_at, role, full_name, mobile_number,
                      password_setup_hash, password_setup_expires_at)
-                    VALUES (?, ?, 'pending', ?, 'employee', ?, ?, ?, ?)""",
-                    (user_id, email, _now(), full_name, mobile_number, setup_code_hash, setup_expires_at),
+                    VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)""",
+                    (user_id, email, _now(), role, full_name, mobile_number, code_hash, expires_at),
                 )
-            return True
-        except sqlite3.IntegrityError:
-            return False
+            except sqlite3.IntegrityError:
+                return "exists"
+            return "created"
 
-    def reissue_employee_setup_code(
-        self, email: str, setup_code_hash: str, setup_expires_at: str | None = None,
-    ) -> bool:
-        with self._lock, self._con:
-            cursor = self._con.execute(
-                """UPDATE users SET password_setup_hash = ?, password_setup_expires_at = ?
-                WHERE email = ? COLLATE NOCASE AND role = 'employee'
-                    AND password_hash = 'pending'""",
-                (setup_code_hash, setup_expires_at, email),
-            )
-            if cursor.rowcount:
-                self._con.execute(
-                    "DELETE FROM employee_setup_attempts WHERE email = ? COLLATE NOCASE",
-                    (email,),
-                )
-            return cursor.rowcount == 1
+    def invitation_role(self, email: str, code_hash: str) -> str | None:
+        """התפקיד של הזמנה תקפה, או None אם הקוד שגוי, פג תוקפו או נוצל."""
+        row = self._con.execute(
+            """SELECT role FROM users
+            WHERE lower(email) = lower(?) AND password_hash = 'pending'
+                AND password_setup_hash = ? AND password_setup_expires_at > ?""",
+            (email, code_hash, _now()),
+        ).fetchone()
+        return row[0] if row else None
 
-    def set_employee_password(self, email: str, setup_code_hash: str, password_hash: str) -> str | None:
+    def accept_invitation(self, email: str, code_hash: str, password_hash: str) -> str | None:
+        """מפעיל את החשבון הממתין עם הסיסמה שנבחרה. הקוד חד-פעמי. מחזיר את מזהה המשתמש."""
         with self._lock, self._con:
             row = self._con.execute(
                 """SELECT id FROM users
-                WHERE email = ? COLLATE NOCASE AND role = 'employee'
-                    AND password_setup_hash = ? AND password_hash = 'pending'
-                    AND password_setup_expires_at > ?""",
-                (email, setup_code_hash, _now()),
+                WHERE lower(email) = lower(?) AND password_hash = 'pending'
+                    AND password_setup_hash = ? AND password_setup_expires_at > ?""",
+                (email, code_hash, _now()),
             ).fetchone()
             if row is None:
                 return None
@@ -336,17 +274,7 @@ class Store:
             )
             return row[0]
 
-    def employee_setup_valid(self, email: str, setup_code_hash: str) -> bool:
-        row = self._con.execute(
-            """SELECT 1 FROM users
-            WHERE email = ? COLLATE NOCASE AND role = 'employee'
-                AND password_setup_hash = ? AND password_hash = 'pending'
-                AND password_setup_expires_at > ?""",
-            (email, setup_code_hash, _now()),
-        ).fetchone()
-        return row is not None
-
-    def employee_setup_attempt_allowed(
+    def registration_attempt_allowed(
         self,
         email: str,
         client_ip: str,
@@ -360,15 +288,13 @@ class Store:
                 (now - window_seconds,),
             )
             row = self._con.execute(
-                """SELECT attempts, window_started_at FROM employee_setup_attempts
-                WHERE email = ? COLLATE NOCASE AND client_ip = ?""",
+                """SELECT attempts FROM employee_setup_attempts
+                WHERE lower(email) = lower(?) AND client_ip = ?""",
                 (email, client_ip),
             ).fetchone()
-            if row is None:
-                return True
-            return row[0] < max_attempts
+            return row is None or row[0] < max_attempts
 
-    def record_employee_setup_failure(
+    def record_registration_failure(
         self,
         email: str,
         client_ip: str,
@@ -381,15 +307,14 @@ class Store:
                 (now - window_seconds,),
             )
             pending = self._con.execute(
-                """SELECT 1 FROM users WHERE email = ? COLLATE NOCASE
-                AND role = 'employee' AND password_hash = 'pending'""",
+                "SELECT 1 FROM users WHERE lower(email) = lower(?) AND password_hash = 'pending'",
                 (email,),
             ).fetchone()
             if pending is None:
                 return
             row = self._con.execute(
                 """SELECT attempts, window_started_at FROM employee_setup_attempts
-                WHERE email = ? COLLATE NOCASE AND client_ip = ?""",
+                WHERE lower(email) = lower(?) AND client_ip = ?""",
                 (email, client_ip),
             ).fetchone()
             if row is None or now - row[1] >= window_seconds:
@@ -403,15 +328,15 @@ class Store:
             else:
                 self._con.execute(
                     """UPDATE employee_setup_attempts SET attempts = attempts + 1
-                    WHERE email = ? COLLATE NOCASE AND client_ip = ?""",
+                    WHERE lower(email) = lower(?) AND client_ip = ?""",
                     (email, client_ip),
                 )
 
-    def clear_employee_setup_attempts(self, email: str, client_ip: str) -> None:
+    def clear_registration_attempts(self, email: str, client_ip: str) -> None:
         with self._lock, self._con:
             self._con.execute(
                 """DELETE FROM employee_setup_attempts
-                WHERE email = ? COLLATE NOCASE AND client_ip = ?""",
+                WHERE lower(email) = lower(?) AND client_ip = ?""",
                 (email, client_ip),
             )
 

@@ -151,3 +151,9 @@ body {
     animation: none;
   }
 }
+
+/* לשדות הסיסמה יש כפתור הצגה משלנו — מסתירים את הכפתור המובנה של Edge כדי שלא יופיעו שניים */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}

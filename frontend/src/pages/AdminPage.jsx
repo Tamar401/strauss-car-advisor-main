@@ -4,56 +4,46 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { Button, Card, Input, Notice } from "../design/components";
 
-export default function AdminPage() {
-  const [email, setEmail] = useState("");
-  const [activation, setActivation] = useState(null);
-  const [employeeEmail, setEmployeeEmail] = useState("");
-  const [employeeName, setEmployeeName] = useState("");
-  const [employeeMobile, setEmployeeMobile] = useState("");
-  const [employeeActivation, setEmployeeActivation] = useState(null);
-  const [error, setError] = useState("");
-  const [employeeError, setEmployeeError] = useState("");
-  const [pending, setPending] = useState(false);
-  const [employeePending, setEmployeePending] = useState(false);
+const ROLES = [
+  { value: "employee", label: "עובד/ת", register: "/employee/register" },
+  { value: "rep", label: "נציג/ת תחבורה", register: "/rep/register" },
+];
 
-  async function createActivation(event) {
+export default function AdminPage() {
+  const [role, setRole] = useState("employee");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [invitation, setInvitation] = useState(null);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+
+  async function invite(event) {
     event.preventDefault();
     setPending(true);
-    setActivation(null);
+    setInvitation(null);
     setError("");
     try {
-      setActivation(await api.createRepresentativeActivation(email));
+      setInvitation(await api.createInvitation(role, email, fullName, mobile));
+      setFullName("");
       setEmail("");
+      setMobile("");
     } catch (err) {
-      setError(err.message);
+      setError(err.status === 409 ? "כבר קיים חשבון פעיל עם הדוא״ל הזה, או הזמנה לתפקיד אחר." : err.message);
     } finally {
       setPending(false);
     }
   }
 
-  async function createEmployeeActivation(event) {
-    event.preventDefault();
-    setEmployeePending(true);
-    setEmployeeActivation(null);
-    setEmployeeError("");
-    try {
-      setEmployeeActivation(await api.createEmployeeActivation(employeeEmail, employeeName, employeeMobile));
-      setEmployeeEmail("");
-      setEmployeeName("");
-      setEmployeeMobile("");
-    } catch (err) {
-      setEmployeeError(err.message);
-    } finally {
-      setEmployeePending(false);
-    }
-  }
+  const invited = ROLES.find((r) => r.value === invitation?.role);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <section>
-        <h1 className="font-display text-3xl font-bold">ניהול חשבונות נציגים</h1>
+        <h1 className="font-display text-3xl font-bold">ניהול משתמשים</h1>
         <p className="mt-2 text-ink-soft">
-          יצירת קוד הרשמה חד-פעמי לנציג/ת תחבורה. הנציג/ה יבחר/תבחר סיסמה בהרשמה.
+          כל החשבונות בהזמנה בלבד. מנפיקים קוד בן 5 ספרות, הקשור לדוא״ל ולתפקיד ותקף ל-24 שעות, והעובד/ת או
+          הנציג/ה נרשמים איתו ובוחרים סיסמה. הזמנה חוזרת לאותו דוא״ל מחליפה את הקוד הקודם.
         </p>
         <Link className="mt-2 inline-block text-sm font-medium text-brand underline" to="/rules">
           מעבר לכללי המערכת
@@ -61,10 +51,34 @@ export default function AdminPage() {
       </section>
 
       <Card className="glass">
-        <h2 className="font-display text-xl font-bold">הזמנת נציג/ת תחבורה</h2>
-        <form onSubmit={createActivation} className="mt-4 space-y-4">
+        <h2 className="font-display text-xl font-bold">הזמנה חדשה</h2>
+        <form onSubmit={invite} className="mt-4 space-y-4">
+          <div role="radiogroup" aria-label="תפקיד" className="grid grid-cols-2 gap-1 rounded-full bg-muted/80 p-1">
+            {ROLES.map((r) => (
+              <button
+                key={r.value}
+                type="button"
+                role="radio"
+                aria-checked={role === r.value}
+                onClick={() => setRole(r.value)}
+                className={`rounded-full px-4 py-2 text-sm transition ${
+                  role === r.value ? "bg-surface font-medium text-brand shadow-card" : "text-ink-soft hover:text-ink"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
           <Input
-            label="שם משתמש (דוא״ל)"
+            label="שם מלא"
+            autoComplete="name"
+            required
+            maxLength={100}
+            value={fullName}
+            onChange={(event) => setFullName(event.target.value)}
+          />
+          <Input
+            label="דוא״ל"
             type="email"
             autoComplete="email"
             required
@@ -72,74 +86,33 @@ export default function AdminPage() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-          {error && <p role="alert" className="text-sm text-down">{error}</p>}
-          <Button type="submit" disabled={pending} className="w-full">
-            {pending ? "יוצר קוד..." : "יצירת קוד הרשמה"}
-          </Button>
-        </form>
-        {activation && (
-          <Notice tone="brand">
-            <p className="font-medium">קוד הרשמה נוצר עבור <bdi dir="ltr">{activation.email}</bdi></p>
-            <p className="mt-2 text-xs">תקף עד {new Date(activation.expires_at).toLocaleString()}</p>
-            <bdi
-              dir="ltr"
-              className="mt-2 block select-all break-all rounded-xl bg-surface px-3 py-2 font-mono text-sm"
-            >
-              {activation.registration_code}
-            </bdi>
-            <p className="mt-2 text-xs">
-              מסרו את הקוד לנציג/ה בערוץ מאובטח. הרשמה תתאפשר בעמוד
-              {" "}<Link className="font-medium underline" to="/rep/register">הרשמת נציגים</Link>.
-            </p>
-          </Notice>
-        )}
-      </Card>
-
-      <Card className="glass">
-        <h2 className="font-display text-xl font-bold">הזמנת עובד/ת עם קוד הפעלה</h2>
-        <p className="mt-2 text-sm text-ink-soft">
-          הקוד קשור לדוא״ל, תקף ל־24 שעות ונועד להגדרת סיסמה ראשונה. אפשר להנפיק קוד חדש אם פג תוקפו.
-        </p>
-        <form onSubmit={createEmployeeActivation} className="mt-4 space-y-4">
-          <Input
-            label="שם מלא"
-            autoComplete="name"
-            required
-            maxLength={100}
-            value={employeeName}
-            onChange={(event) => setEmployeeName(event.target.value)}
-          />
-          <Input
-            label="כתובת דוא״ל"
-            type="email"
-            autoComplete="email"
-            required
-            maxLength={254}
-            value={employeeEmail}
-            onChange={(event) => setEmployeeEmail(event.target.value)}
-          />
           <Input
             label="מספר טלפון (לא חובה)"
             type="tel"
             autoComplete="tel"
             dir="ltr"
             maxLength={32}
-            value={employeeMobile}
-            onChange={(event) => setEmployeeMobile(event.target.value)}
+            value={mobile}
+            onChange={(event) => setMobile(event.target.value)}
           />
-          {employeeError && <p role="alert" className="text-sm text-down">{employeeError}</p>}
-          <Button type="submit" disabled={employeePending} className="w-full">
-            {employeePending ? "יוצר קוד…" : "יצירת קוד לעובד/ת"}
+          {error && <p role="alert" className="text-sm text-down">{error}</p>}
+          <Button type="submit" disabled={pending} className="w-full">
+            {pending ? "יוצר קוד…" : `יצירת קוד ל${ROLES.find((r) => r.value === role).label}`}
           </Button>
         </form>
-        {employeeActivation && (
+        {invitation && (
           <Notice tone="brand">
-            <p className="font-medium">קוד הפעלה נוצר עבור <bdi dir="ltr">{employeeActivation.email}</bdi></p>
-            <p className="mt-2 text-xs">תקף עד {new Date(employeeActivation.expires_at).toLocaleString()}</p>
-            <bdi dir="ltr" className="mt-2 block select-all break-all rounded-xl bg-surface px-3 py-2 font-mono text-lg">
-              {employeeActivation.setup_code}
+            <p className="font-medium">
+              קוד הרשמה ל{invited.label}: <bdi dir="ltr">{invitation.email}</bdi>
+            </p>
+            <bdi dir="ltr" className="mt-2 block select-all rounded-xl bg-surface px-3 py-2 text-center font-mono text-2xl tracking-[0.4em]">
+              {invitation.code}
             </bdi>
-            <p className="mt-2 text-xs">יש למסור לעובד/ת בערוץ מאובטח. הקוד יוצג פעם אחת בלבד.</p>
+            <p className="mt-2 text-xs">
+              תקף עד {new Date(invitation.expires_at).toLocaleString("he-IL")}. הקוד מוצג פעם אחת בלבד, מסרו אותו בערוץ
+              מאובטח. ההרשמה בעמוד{" "}
+              <Link className="font-medium underline" to={invited.register}>הרשמת {invited.label}</Link>.
+            </p>
           </Notice>
         )}
       </Card>
