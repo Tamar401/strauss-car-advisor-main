@@ -23,10 +23,32 @@ def admin_session(monkeypatch):
     app.dependency_overrides.pop(get_current_user, None)
     response = client.post(
         "/api/auth/login",
-        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "role": "admin"},
     )
     assert response.status_code == 200
     return response.json()
+
+
+def test_admin_login_reports_missing_server_configuration(monkeypatch, isolated):
+    monkeypatch.delenv("ADMIN_USERNAME", raising=False)
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    response = client.post(
+        "/api/auth/login",
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "role": "admin"},
+    )
+    assert response.status_code == 503
+    assert "ADMIN_USERNAME" in response.json()["detail"]
+
+
+def test_admin_login_rejects_invalid_server_username_configuration(monkeypatch, isolated):
+    monkeypatch.setenv("ADMIN_USERNAME", "administrator")
+    monkeypatch.setenv("ADMIN_PASSWORD", ADMIN_PASSWORD)
+    response = client.post(
+        "/api/auth/login",
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "role": "admin"},
+    )
+    assert response.status_code == 503
+    assert "email" in response.json()["detail"]
 
 
 def register_employee(email="employee@example.test", full_name="Employee Person"):
@@ -46,6 +68,77 @@ def representative_activation(admin_headers, email="rep@example.test"):
         headers=admin_headers,
         json={"email": email},
     )
+
+
+def test_admin_issues_employee_setup_code_and_employee_can_log_in(monkeypatch, isolated):
+    admin = admin_session(monkeypatch)
+    headers = auth_headers(admin)
+    request = {
+        "email": "new.employee@example.test",
+        "full_name": "New Employee",
+        "mobile_number": "0501234567",
+    }
+    assert client.post("/api/auth/employees/activation", json=request).status_code == 401
+
+    activated = client.post("/api/auth/employees/activation", headers=headers, json=request)
+    assert activated.status_code == 201
+    activation = activated.json()
+    assert len(activation["setup_code"]) == 5
+    saved = isolated.user_by_email(request["email"])
+    assert saved["password_hash"] == "pending"
+    assert saved["password_setup_hash"] == hashlib.sha256(activation["setup_code"].encode("ascii")).hexdigest()
+    assert datetime.fromisoformat(saved["password_setup_expires_at"]) == datetime.fromisoformat(
+        activation["expires_at"].replace("Z", "+00:00")
+    )
+
+    setup = client.post(
+        "/api/auth/set-password",
+        json={"email": request["email"], "setup_code": activation["setup_code"], "password": "employee-password-12"},
+    )
+    assert setup.status_code == 200
+    assert setup.json()["user"]["role"] == "employee"
+    assert client.post(
+        "/api/auth/login",
+        json={"email": request["email"], "password": "employee-password-12"},
+    ).status_code == 200
+    assert client.post(
+        "/api/auth/set-password",
+        json={"email": request["email"], "setup_code": activation["setup_code"], "password": "another-password-12"},
+    ).status_code == 401
+
+
+def test_admin_can_reissue_employee_setup_code(monkeypatch, isolated):
+    admin = admin_session(monkeypatch)
+    headers = auth_headers(admin)
+    request = {"email": "pending.employee@example.test", "full_name": "Pending Employee"}
+    first = client.post("/api/auth/employees/activation", headers=headers, json=request).json()
+    second = client.post("/api/auth/employees/activation", headers=headers, json=request).json()
+    assert first["setup_code"] != second["setup_code"]
+    assert client.post(
+        "/api/auth/set-password",
+        json={"email": request["email"], "setup_code": first["setup_code"], "password": "employee-password-12"},
+    ).status_code == 401
+    assert client.post(
+        "/api/auth/set-password",
+        json={"email": request["email"], "setup_code": second["setup_code"], "password": "employee-password-12"},
+    ).status_code == 200
+
+
+def test_expired_employee_setup_code_is_rejected(isolated):
+    email = "expired.employee@example.test"
+    setup_code = "54321"
+    assert isolated.create_pending_employee(
+        "expired-employee",
+        email,
+        hashlib.sha256(setup_code.encode("ascii")).hexdigest(),
+        full_name="Expired Employee",
+        setup_expires_at="2000-01-01T00:00:00+00:00",
+    )
+    response = client.post(
+        "/api/auth/set-password",
+        json={"email": email, "setup_code": setup_code, "password": "employee-password-12"},
+    )
+    assert response.status_code == 401
 
 
 def test_employee_registration_requires_details_and_assigns_employee_role(isolated):
@@ -195,6 +288,11 @@ def test_admin_is_only_role_that_can_issue_rep_codes_and_change_rules(monkeypatc
 
     assert representative_activation(auth_headers(employee), "blocked@example.test").status_code == 403
     assert representative_activation(auth_headers(rep_login), "blocked@example.test").status_code == 403
+    assert client.post(
+        "/api/auth/employees/activation",
+        headers=auth_headers(rep_login),
+        json={"email": "blocked@example.test", "full_name": "Blocked Employee"},
+    ).status_code == 403
     assert client.post(
         "/api/rules/preview",
         headers=auth_headers(employee),

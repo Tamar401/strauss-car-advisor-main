@@ -47,7 +47,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 password_hash TEXT NOT NULL, created_at TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'employee',
-                full_name TEXT, mobile_number TEXT, password_setup_hash TEXT
+                full_name TEXT, mobile_number TEXT, password_setup_hash TEXT,
+                password_setup_expires_at TEXT
             );
             CREATE TABLE IF NOT EXISTS auth_sessions (
                 token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL,
@@ -81,6 +82,8 @@ class Store:
             self._con.execute("ALTER TABLE users ADD COLUMN mobile_number TEXT")
         if "password_setup_hash" not in user_columns:
             self._con.execute("ALTER TABLE users ADD COLUMN password_setup_hash TEXT")
+        if "password_setup_expires_at" not in user_columns:
+            self._con.execute("ALTER TABLE users ADD COLUMN password_setup_expires_at TEXT")
         question_columns = {row[1] for row in self._con.execute("PRAGMA table_info(rep_questions)")}
         if "answered_by" not in question_columns:
             self._con.execute("ALTER TABLE rep_questions ADD COLUMN answered_by TEXT")
@@ -282,26 +285,30 @@ class Store:
         setup_code_hash: str,
         full_name: str | None = None,
         mobile_number: str | None = None,
+        setup_expires_at: str | None = None,
     ) -> bool:
         try:
             with self._lock, self._con:
                 self._con.execute(
                     """INSERT INTO users
-                    (id, email, password_hash, created_at, role, full_name, mobile_number, password_setup_hash)
-                    VALUES (?, ?, 'pending', ?, 'employee', ?, ?, ?)""",
-                    (user_id, email, _now(), full_name, mobile_number, setup_code_hash),
+                    (id, email, password_hash, created_at, role, full_name, mobile_number,
+                     password_setup_hash, password_setup_expires_at)
+                    VALUES (?, ?, 'pending', ?, 'employee', ?, ?, ?, ?)""",
+                    (user_id, email, _now(), full_name, mobile_number, setup_code_hash, setup_expires_at),
                 )
             return True
         except sqlite3.IntegrityError:
             return False
 
-    def reissue_employee_setup_code(self, email: str, setup_code_hash: str) -> bool:
+    def reissue_employee_setup_code(
+        self, email: str, setup_code_hash: str, setup_expires_at: str | None = None,
+    ) -> bool:
         with self._lock, self._con:
             cursor = self._con.execute(
-                """UPDATE users SET password_setup_hash = ?
+                """UPDATE users SET password_setup_hash = ?, password_setup_expires_at = ?
                 WHERE email = ? COLLATE NOCASE AND role = 'employee'
                     AND password_hash = 'pending'""",
-                (setup_code_hash, email),
+                (setup_code_hash, setup_expires_at, email),
             )
             if cursor.rowcount:
                 self._con.execute(
@@ -315,13 +322,15 @@ class Store:
             row = self._con.execute(
                 """SELECT id FROM users
                 WHERE email = ? COLLATE NOCASE AND role = 'employee'
-                    AND password_setup_hash = ? AND password_hash = 'pending'""",
-                (email, setup_code_hash),
+                    AND password_setup_hash = ? AND password_hash = 'pending'
+                    AND password_setup_expires_at > ?""",
+                (email, setup_code_hash, _now()),
             ).fetchone()
             if row is None:
                 return None
             self._con.execute(
-                """UPDATE users SET password_hash = ?, password_setup_hash = NULL
+                """UPDATE users SET password_hash = ?, password_setup_hash = NULL,
+                    password_setup_expires_at = NULL
                 WHERE id = ?""",
                 (password_hash, row[0]),
             )
@@ -331,8 +340,9 @@ class Store:
         row = self._con.execute(
             """SELECT 1 FROM users
             WHERE email = ? COLLATE NOCASE AND role = 'employee'
-                AND password_setup_hash = ? AND password_hash = 'pending'""",
-            (email, setup_code_hash),
+                AND password_setup_hash = ? AND password_hash = 'pending'
+                AND password_setup_expires_at > ?""",
+            (email, setup_code_hash, _now()),
         ).fetchone()
         return row is not None
 
@@ -422,13 +432,15 @@ class Store:
 
     def user_by_email(self, email: str) -> dict | None:
         row = self._con.execute(
-            """SELECT id, email, password_hash, role, full_name, mobile_number, password_setup_hash
+            """SELECT id, email, password_hash, role, full_name, mobile_number,
+                password_setup_hash, password_setup_expires_at
             FROM users WHERE email = ? COLLATE NOCASE""",
             (email,),
         ).fetchone()
         return {
             "id": row[0], "email": row[1], "password_hash": row[2], "role": row[3],
             "full_name": row[4], "mobile_number": row[5], "password_setup_hash": row[6],
+            "password_setup_expires_at": row[7],
         } if row else None
 
     def create_session(self, token_hash: str, user_id: str, expires_at: str) -> None:

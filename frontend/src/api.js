@@ -41,15 +41,16 @@ export function setAccessCode(code) {
 async function request(path, options = {}) {
   const code = getAccessCode();
   const token = getSessionToken();
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const res = await fetch(`/api${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(!isFormData ? { "Content-Type": "application/json" } : {}),
       ...(code ? { "X-Access-Code": code } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body: options.body ? (isFormData ? options.body : JSON.stringify(options.body)) : undefined,
   });
   if (!res.ok) {
     const detail = (await res.json().catch(() => ({}))).detail;
@@ -70,6 +71,11 @@ export const api = {
     }),
   createRepresentativeActivation: (email) =>
     request("/auth/representatives", { method: "POST", body: { email } }),
+  createEmployeeActivation: (email, fullName, mobileNumber) =>
+    request("/auth/employees/activation", {
+      method: "POST",
+      body: { email, full_name: fullName, mobile_number: mobileNumber || null },
+    }),
   registerRepresentative: (email, password, registrationCode) =>
     request("/auth/representatives/register", {
       method: "POST",
@@ -80,7 +86,7 @@ export const api = {
       method: "POST",
       body: { email, password, full_name: fullName, mobile_number: mobileNumber },
     }),
-  login: (email, password) => request("/auth/login", { method: "POST", body: { email, password } }),
+  login: (email, password, role) => request("/auth/login", { method: "POST", body: { email, password, role } }),
   currentUser: () => request("/auth/me"),
   logout: () => request("/auth/logout", { method: "POST" }),
   catalog: () => request("/catalog"),
@@ -98,6 +104,15 @@ export const api = {
       method: "PATCH",
       body: { fields, current_participation: currentParticipation ?? null },
     }),
+  extractPayslip: (file, conversationId, consent) => {
+    const body = new FormData();
+    body.append("file", file);
+    body.append("consent", String(consent));
+    if (conversationId) body.append("conversation_id", conversationId);
+    return request("/payslip/extract", { method: "POST", body });
+  },
+  confirmPayslip: (conversationId, fields) =>
+    request(`/conversations/${conversationId}/payslip/confirm`, { method: "POST", body: { fields } }),
   loadDemo: (conversationId, employeeId) =>
     request(`/conversations/${conversationId ?? "new"}/demo/${employeeId}`, { method: "POST" }),
   checkAccess: (role, code) => request(`/auth/check/${role}`, { headers: { "X-Access-Code": code } }),

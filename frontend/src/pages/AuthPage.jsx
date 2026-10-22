@@ -41,7 +41,7 @@ export default function AuthPage({ mode }) {
       }
       const session = mode === "set-password"
         ? await api.setEmployeePassword(email, setupCode, password)
-        : await api.login(email, password);
+        : await api.login(email, password, mode === "admin-login" ? "admin" : undefined);
       if (mode === "rep-login" && session.user.role !== "rep") {
         setError("לחשבון הזה אין הרשאת נציג. יש להשתמש בפרטי חשבון נציג.");
         return;
@@ -53,8 +53,10 @@ export default function AuthPage({ mode }) {
       establishSession(session);
       navigate(session.user.role === "admin" ? "/admin" : session.user.role === "rep" ? "/rep" : "/employee", { replace: true });
     } catch (err) {
-      if (err.status === 401 && mode === "set-password") {
-        setError("שם המשתמש או קוד ההפעלה אינם נכונים או שכבר נוצלו.");
+      if (err.status === 503 && mode === "admin-login") {
+        setError("כניסת מנהל/ת לא הוגדרה בשרת. יש להגדיר ADMIN_USERNAME (כתובת דוא״ל) ו-ADMIN_PASSWORD באורך 12 תווים לפחות בקובץ .env ולהפעיל מחדש את השרת.");
+      } else if (err.status === 401 && mode === "set-password") {
+        setError("הקוד אינו תקף, פג תוקפו או נוצל. ודאו שכתובת הדוא״ל תואמת להזמנה ובקשו מהמנהל/ת קוד חדש.");
       } else if (err.status === 422 && mode === "set-password") {
         setError("בחרו סיסמה באורך 12 תווים לפחות ובדקו את כתובת הדוא״ל.");
       } else if (err.status === 401 && mode === "rep-register") {
@@ -86,6 +88,7 @@ export default function AuthPage({ mode }) {
             <Button variant="ghost" onClick={() => navigate("/rep/login")}>כניסת נציג/ת תחבורה</Button>
             <Button variant="ghost" onClick={() => navigate("/rep/register")}>הרשמת נציג/ת תחבורה</Button>
             <Button variant="ghost" onClick={() => navigate("/admin/login")}>כניסת מנהל/ת</Button>
+            <Button variant="ghost" onClick={() => navigate("/set-password")}>הגדרת סיסמה עם קוד מהמנהל/ת</Button>
           </div>
         </Card>
       </div>
@@ -292,6 +295,8 @@ export default function AuthPage({ mode }) {
             mode === "rep-login"
               ? <Link className="font-medium text-brand underline" to="/rep/register">יש לכם קוד הרשמה? הירשמו כנציגים</Link>
               : "הכניסה למנהל/ת נפרדת מחשבונות עובדים ונציגים."
+          ) : mode === "login" ? (
+            <Link className="font-medium text-brand underline" to="/set-password">קיבלתם קוד מהמנהל/ת? הגדירו סיסמה</Link>
           ) : (
             <Link className="font-medium text-brand underline" to="/employee/register">חדשים במערכת? הרשמת עובד/ת</Link>
           )}
