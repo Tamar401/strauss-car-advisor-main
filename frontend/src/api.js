@@ -61,7 +61,13 @@ async function request(path, options = {}) {
     err.status = res.status;
     throw err;
   }
-  return res.json();
+  // תגובה ריקה או לא-JSON פירושה שהבקשה לא הגיעה לשרת ה-API (למשל VITE_API_BASE_URL לא הוגדר בבנייה)
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("לא התקבלה תשובה תקינה משרת ה-API. ודאו שכתובת השרת (VITE_API_BASE_URL) מוגדרת.");
+  }
 }
 
 export const api = {
