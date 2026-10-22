@@ -283,7 +283,7 @@ export default function AuthPage({ mode }) {
                 ? "הרשמה"
                 : isRepresentativeRegistration
                   ? "הפעלת חשבון נציג"
-                  : "Log in"}
+                  : "כניסה"}
           </Button>
         </form>
         <p className="mt-5 text-center text-sm text-ink-soft">

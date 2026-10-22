@@ -14,6 +14,7 @@ from app.store import get_store
 log = logging.getLogger(__name__)
 PRODUCTION_FRONTEND_ORIGIN = "https://strauss-car-advisor-frontend.onrender.com"
 KEEP_ALIVE_SECONDS = 10 * 60  # השרת החינמי של Render נרדם אחרי 15 דקות בלי בקשות
+PURGE_SECONDS = 24 * 60 * 60
 
 
 def _allowed_origins() -> list[str]:
@@ -34,17 +35,33 @@ async def _keep_alive(url: str) -> None:
                 log.warning("keep-alive נכשל: %s", e)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    days = int(os.environ.get("RETENTION_DAYS", "30"))
+def _purge(days: int) -> None:
     purged = get_store().purge_older_than(days)
     if purged:
         log.info("נמחקו %d שיחות ישנות מ-%d ימים", purged, days)
+
+
+async def _purge_daily(days: int) -> None:
+    """בזכות ה-keep-alive השרת כמעט לא עולה מחדש — לכן המחיקה רצה גם כל יום, לא רק בעלייה."""
+    while True:
+        await asyncio.sleep(PURGE_SECONDS)
+        try:
+            _purge(days)
+        except Exception:
+            log.exception("מחיקת שיחות ישנות נכשלה")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    days = int(os.environ.get("RETENTION_DAYS", "30"))
+    _purge(days)
     vou.lookup_ready()  # בונה את מאגר שווי השימוש עכשיו, ולא בשאלה הראשונה של עובד
+    tasks = [asyncio.create_task(_purge_daily(days))]
     url = os.environ.get("RENDER_EXTERNAL_URL")  # Render מגדיר אותו לבד; מקומית — אין keep-alive
-    task = asyncio.create_task(_keep_alive(url.rstrip("/"))) if url else None
+    if url:
+        tasks.append(asyncio.create_task(_keep_alive(url.rstrip("/"))))
     yield
-    if task:
+    for task in tasks:
         task.cancel()
 
 
