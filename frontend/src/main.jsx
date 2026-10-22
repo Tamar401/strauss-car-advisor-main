@@ -16,7 +16,7 @@ import RulesPage from "./pages/RulesPage";
 // /design — דף ייחוס פנימי למפתחות, לא בתפריט. נכנסים בכתובת ישירה
 const NAV = {
   admin: [
-    { to: "/admin", label: "ניהול משתמשים" },
+    { to: "/admin", label: "ניהול נציגים" },
     { to: "/rules", label: "כללים" },
   ],
 };

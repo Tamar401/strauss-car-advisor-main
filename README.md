@@ -27,7 +27,7 @@ npm install
 npm run dev                    # http://localhost:5173
 ```
 
-חשבונות העובדים, הנציגים והשיחות הפרטיות נשמרים ב-`data/app.db`. **כל החשבונות בהזמנה בלבד:** מנהל/ת נכנס/ת דרך `/admin/login` עם `ADMIN_USERNAME` (כתובת דוא״ל) ו-`ADMIN_PASSWORD` באורך 12 תווים לפחות, ובמסך "ניהול משתמשים" מנפיק/ה לעובד/ת או לנציג/ה קוד בן 5 ספרות, הקשור לדוא״ל ולתפקיד ותקף ל-24 שעות. העובד/ת נרשם/ת ב-`/employee/register` והנציג/ה ב-`/rep/register`, עם הדוא״ל, הקוד וסיסמה לבחירתם, ואחר כך נכנסים ב-`/login` או ב-`/rep/login`. אין הרשמה פתוחה בלי קוד. כללי המערכת נמצאים במסך הנפרד `/rules`, ושמירתם דורשת התחברות מנהל/ת. שאלות פתוחות משותפות לצוות, ורק הנציג/ה שענה/תה רואה את השאלה בהיסטוריית המענה שלו/ה. קוד `REP_ACCESS_CODE` נשאר לחיפוש כלי רכב.
+חשבונות העובדים, הנציגים והשיחות הפרטיות נשמרים ב-`data/app.db`. עובדים נרשמים לבד ב-`/employee/register` (שם, דוא״ל וסיסמה) ונכנסים ב-`/login`. **נציגים נרשמים רק בהזמנה**, כי הם רואים את השאלות של כל העובדים: מנהל/ת נכנס/ת דרך `/admin/login` עם `ADMIN_USERNAME` (כתובת דוא״ל) ו-`ADMIN_PASSWORD` באורך 12 תווים לפחות, ובמסך "ניהול נציגים" מנפיק/ה קוד בן 5 ספרות, הקשור לדוא״ל ותקף ל-24 שעות. הנציג/ה נרשם/ת ב-`/rep/register` ונכנס/ת ב-`/rep/login`. להדגמה ולשופטות: `DEMO_REP_EMAIL` ו-`DEMO_REP_PASSWORD` יוצרים חשבון נציג/ה קבוע בכל עלייה של השרת, גם אחרי פריסה שמחקה את הנתונים. כללי המערכת נמצאים במסך הנפרד `/rules`, ושמירתם דורשת התחברות מנהל/ת. שאלות פתוחות משותפות לצוות, ורק הנציג/ה שענה/תה רואה את השאלה בהיסטוריית המענה שלו/ה. קוד `REP_ACCESS_CODE` נשאר לחיפוש כלי רכב.
 
 במסך העובד ניתן להעלות תלוש PDF או תמונה עד 10 MB. הקובץ נשלח לשירות ה-AI שהוגדר לצורך חילוץ ואינו נשמר ביישום. הערכים שחולצו מוצגים לבדיקה ולתיקון; רק לאחר אישור העובד הם נשמרים בפרופיל. לצורך תלושים אמיתיים יש להשתמש ב-Vertex AI, או להפעיל במפורש `PAYSLIP_ALLOW_GEMINI_API=true` רק לאחר אישור תוכנית Gemini בתשלום. חילוץ דורש גם הגדרת `GEMINI_API_KEY` או Vertex AI.
 
@@ -37,7 +37,7 @@ npm run dev                    # http://localhost:5173
 
 | שירות | הגדרות |
 |---|---|
-| **שרת** (Web Service) | Root Directory `backend` · Build `pip install -r requirements.txt` · Start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. משתני סביבה: `GEMINI_API_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `REP_ACCESS_CODE`, `CORS_ORIGINS` = כתובת הממשק |
+| **שרת** (Web Service) | Root Directory `backend` · Build `pip install -r requirements.txt` · Start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. משתני סביבה: `GEMINI_API_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `DEMO_REP_EMAIL`, `DEMO_REP_PASSWORD`, `REP_ACCESS_CODE`, `CORS_ORIGINS` = כתובת הממשק |
 | **ממשק** (Static Site) | Root Directory `frontend` · Build `npm install && npm run build` · Publish `dist`. משתנה סביבה: `VITE_API_BASE_URL` = כתובת השרת |
 
 - שני השירותים בונים מהענף `main`. Auto-Deploy פועל, כך שכל מיזוג ל-`main` עולה לאוויר.

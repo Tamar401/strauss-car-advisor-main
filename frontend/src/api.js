@@ -71,13 +71,18 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  createInvitation: (role, email, fullName, mobileNumber) =>
+  createRepInvitation: (email, fullName, mobileNumber) =>
     request("/auth/invitations", {
       method: "POST",
-      body: { role, email, full_name: fullName, mobile_number: mobileNumber || null },
+      body: { email, full_name: fullName, mobile_number: mobileNumber || null },
     }),
-  register: (role, email, code, password) =>
-    request("/auth/register", { method: "POST", body: { role, email, code, password } }),
+  registerEmployee: (email, password, fullName, mobileNumber) =>
+    request("/auth/employees/register", {
+      method: "POST",
+      body: { email, password, full_name: fullName, mobile_number: mobileNumber || null },
+    }),
+  registerRep: (email, code, password) =>
+    request("/auth/representatives/register", { method: "POST", body: { email, code, password } }),
   login: (email, password, role) => request("/auth/login", { method: "POST", body: { email, password, role } }),
   currentUser: () => request("/auth/me"),
   logout: () => request("/auth/logout", { method: "POST" }),

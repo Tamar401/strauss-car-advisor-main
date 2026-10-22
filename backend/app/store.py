@@ -340,6 +340,22 @@ class Store:
                 (email, client_ip),
             )
 
+    def upsert_demo_rep(self, email: str, password_hash: str) -> bool:
+        """חשבון נציג/ה קבוע לדמו (מ-.env), כדי שאפשר יהיה להריץ את כל התסריט גם אחרי פריסה."""
+        try:
+            with self._lock, self._con:
+                self._con.execute(
+                    """INSERT INTO users
+                    (id, email, password_hash, created_at, role, full_name)
+                    VALUES ('demo-rep', ?, ?, ?, 'rep', 'נציג/ת הדגמה')
+                    ON CONFLICT(id) DO UPDATE SET
+                        email = excluded.email, password_hash = excluded.password_hash, role = 'rep'""",
+                    (email, password_hash, _now()),
+                )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
     def upsert_admin_account(self, email: str, password_hash: str) -> bool:
         try:
             with self._lock, self._con:

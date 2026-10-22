@@ -4,10 +4,11 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import accounts, chat, compare, data, payslip, rep, rules
+from app.auth import hash_password, normalize_email
 from app.engine import vou
 from app.store import get_store
 
@@ -51,10 +52,28 @@ async def _purge_daily(days: int) -> None:
             log.exception("מחיקת שיחות ישנות נכשלה")
 
 
+def _seed_demo_rep() -> None:
+    email = os.environ.get("DEMO_REP_EMAIL", "").strip()
+    password = os.environ.get("DEMO_REP_PASSWORD", "")
+    if not email:
+        return
+    if len(password) < 12:
+        log.warning("DEMO_REP_PASSWORD חייבת להיות באורך 12 תווים לפחות; חשבון נציג ההדגמה לא נוצר")
+        return
+    try:
+        email = normalize_email(email)
+    except HTTPException:
+        log.warning("DEMO_REP_EMAIL אינה כתובת דוא״ל תקינה; חשבון נציג ההדגמה לא נוצר")
+        return
+    if not get_store().upsert_demo_rep(email, hash_password(password)):
+        log.warning("DEMO_REP_EMAIL כבר שייך לחשבון אחר; חשבון נציג ההדגמה לא נוצר")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     days = int(os.environ.get("RETENTION_DAYS", "30"))
     _purge(days)
+    _seed_demo_rep()
     vou.lookup_ready()  # בונה את מאגר שווי השימוש עכשיו, ולא בשאלה הראשונה של עובד
     tasks = [asyncio.create_task(_purge_daily(days))]
     url = os.environ.get("RENDER_EXTERNAL_URL")  # Render מגדיר אותו לבד; מקומית — אין keep-alive
