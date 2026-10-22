@@ -71,28 +71,13 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  setEmployeePassword: (email, setupCode, password) =>
-    request("/auth/set-password", {
+  createInvitation: (role, email, fullName, mobileNumber) =>
+    request("/auth/invitations", {
       method: "POST",
-      body: { email, setup_code: setupCode, password },
+      body: { role, email, full_name: fullName, mobile_number: mobileNumber || null },
     }),
-  createRepresentativeActivation: (email) =>
-    request("/auth/representatives", { method: "POST", body: { email } }),
-  createEmployeeActivation: (email, fullName, mobileNumber) =>
-    request("/auth/employees/activation", {
-      method: "POST",
-      body: { email, full_name: fullName, mobile_number: mobileNumber || null },
-    }),
-  registerRepresentative: (email, password, registrationCode) =>
-    request("/auth/representatives/register", {
-      method: "POST",
-      body: { email, password, registration_code: registrationCode },
-    }),
-  registerEmployee: (email, password, fullName, mobileNumber) =>
-    request("/auth/employees/register", {
-      method: "POST",
-      body: { email, password, full_name: fullName, mobile_number: mobileNumber },
-    }),
+  register: (role, email, code, password) =>
+    request("/auth/register", { method: "POST", body: { role, email, code, password } }),
   login: (email, password, role) => request("/auth/login", { method: "POST", body: { email, password, role } }),
   currentUser: () => request("/auth/me"),
   logout: () => request("/auth/logout", { method: "POST" }),

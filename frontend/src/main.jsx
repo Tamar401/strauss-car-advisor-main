@@ -16,7 +16,7 @@ import RulesPage from "./pages/RulesPage";
 // /design — דף ייחוס פנימי למפתחות, לא בתפריט. נכנסים בכתובת ישירה
 const NAV = {
   admin: [
-    { to: "/admin", label: "ניהול נציגים" },
+    { to: "/admin", label: "ניהול משתמשים" },
     { to: "/rules", label: "כללים" },
   ],
 };
@@ -122,7 +122,7 @@ function Shell() {
             ) : !checking ? (
               <NavLink
                 className="rounded-full border border-border bg-surface/80 px-4 py-1.5 text-sm font-medium transition hover:border-brand hover:text-brand"
-                to="/login"
+                to="/welcome"
               >
                 התחברות
               </NavLink>
@@ -137,7 +137,8 @@ function Shell() {
           <Route path="/welcome" element={<AuthPage mode="welcome" />} />
           <Route path="/register" element={<Navigate to="/employee/register" replace />} />
           <Route path="/employee/register" element={<AuthPage mode="employee-register" />} />
-          <Route path="/set-password" element={<AuthPage mode="set-password" />} />
+          {/* הקישור הישן להגדרת סיסמה עם קוד — היום זו ההרשמה הרגילה */}
+          <Route path="/set-password" element={<Navigate to="/employee/register" replace />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/rep/login" element={<AuthPage mode="rep-login" />} />
           <Route path="/rep/register" element={<AuthPage mode="rep-register" />} />

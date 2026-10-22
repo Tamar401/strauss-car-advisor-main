@@ -1,4 +1,8 @@
-"""Employee registration, representative activation, login, and session management."""
+"""Invitations, registration, login, and session management.
+
+Accounts are invitation-only: an administrator issues a 5-digit code tied to an email and a role
+(employee or representative), and the person registers with it and chooses a password.
+"""
 import hashlib
 import hmac
 import os
@@ -32,15 +36,10 @@ class Credentials(BaseModel):
     role: str | None = Field(default=None, pattern="^(employee|rep|admin)$")
 
 
-class RepresentativeActivationRequest(BaseModel):
+class InvitationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(min_length=3, max_length=254)
-
-
-class EmployeeActivationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+    role: str = Field(pattern="^(employee|rep)$")
     email: str = Field(min_length=3, max_length=254)
     full_name: str = Field(min_length=1, max_length=100)
     mobile_number: str | None = Field(default=None, max_length=32)
@@ -54,33 +53,12 @@ class EmployeeActivationRequest(BaseModel):
         return value
 
 
-class RepresentativeRegistration(Credentials):
-    registration_code: str = Field(pattern=r"^[A-Za-z0-9_-]{40,64}$")
-    password: str = Field(min_length=12, max_length=128)
-
-
-class EmployeeRegistration(BaseModel):
+class Registration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    role: str = Field(pattern="^(employee|rep)$")
     email: str = Field(min_length=3, max_length=254)
-    password: str = Field(min_length=12, max_length=128)
-    full_name: str = Field(min_length=1, max_length=100)
-    mobile_number: str | None = Field(default=None, max_length=32)
-
-    @field_validator("full_name")
-    @classmethod
-    def require_full_name(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Full name is required.")
-        return value
-
-
-class PasswordSetup(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    email: str = Field(min_length=3, max_length=254)
-    setup_code: str = Field(pattern=r"^[0-9]{5}$")
+    code: str = Field(pattern=r"^[0-9]{5}$")
     password: str = Field(min_length=12, max_length=128)
 
 
@@ -99,16 +77,15 @@ class SessionResponse(BaseModel):
     user: UserResponse
 
 
-class RepresentativeActivationResponse(BaseModel):
+class InvitationResponse(BaseModel):
+    role: str
     email: str
-    registration_code: str
+    code: str
     expires_at: datetime
 
 
-class EmployeeActivationResponse(BaseModel):
-    email: str
-    setup_code: str
-    expires_at: datetime
+def _code_hash(code: str) -> str:
+    return hashlib.sha256(code.encode("ascii")).hexdigest()
 
 
 def _new_session(
@@ -133,130 +110,50 @@ def _new_session(
 
 
 @router.post(
-    "/representatives",
-    response_model=RepresentativeActivationResponse,
+    "/invitations",
+    response_model=InvitationResponse,
     status_code=201,
     dependencies=[Depends(require_admin)],
 )
-def create_representative_activation(request: RepresentativeActivationRequest):
+def create_invitation(request: InvitationRequest):
     email = normalize_email(request.email)
-    store = get_store()
-    if store.user_by_email(email):
-        raise HTTPException(409, "An account with this email already exists.")
-    registration_code = secrets.token_urlsafe(32)
+    code = f"{secrets.randbelow(100_000):05d}"
     expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-    store.create_representative_activation(
+    result = get_store().create_invitation(
+        uuid4().hex,
         email,
-        hashlib.sha256(registration_code.encode("ascii")).hexdigest(),
+        request.role,
+        _code_hash(code),
         expires_at.isoformat(),
+        request.full_name,
+        (request.mobile_number or "").strip() or None,
     )
-    return RepresentativeActivationResponse(
-        email=email,
-        registration_code=registration_code,
-        expires_at=expires_at,
-    )
-
-
-@router.post(
-    "/employees/activation",
-    response_model=EmployeeActivationResponse,
-    status_code=201,
-    dependencies=[Depends(require_admin)],
-)
-def create_employee_activation(request: EmployeeActivationRequest):
-    email = normalize_email(request.email)
-    full_name = request.full_name
-    mobile_number = (request.mobile_number or "").strip() or None
-    store = get_store()
-    existing = store.user_by_email(email)
-    if existing and (existing["role"] != "employee" or existing["password_hash"] != "pending"):
-        raise HTTPException(409, "An active account with this email already exists.")
-
-    setup_code = f"{secrets.randbelow(100_000):05d}"
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-    setup_hash = hashlib.sha256(setup_code.encode("ascii")).hexdigest()
-    if existing:
-        created = store.reissue_employee_setup_code(email, setup_hash, expires_at.isoformat())
-    else:
-        created = store.create_pending_employee(
-            uuid4().hex,
-            email,
-            setup_hash,
-            full_name,
-            mobile_number,
-            expires_at.isoformat(),
-        )
-    if not created:
-        raise HTTPException(409, "Could not create an employee activation code.")
-    return EmployeeActivationResponse(email=email, setup_code=setup_code, expires_at=expires_at)
-
-
-@router.post(
-    "/representatives/register",
-    response_model=UserResponse,
-    status_code=201,
-)
-def register_representative(registration: RepresentativeRegistration):
-    email = normalize_email(registration.email)
-    user_id = uuid4().hex
-    registration_hash = hashlib.sha256(registration.registration_code.encode("ascii")).hexdigest()
-    store = get_store()
-    if not store.representative_activation_valid(email, registration_hash):
-        raise HTTPException(401, "The registration code is invalid, expired, or already used.")
-    result = store.activate_representative(
-        user_id,
-        email,
-        hash_password(registration.password),
-        registration_hash,
-    )
-    if result == "invalid":
-        raise HTTPException(401, "The registration code is invalid, expired, or already used.")
     if result == "exists":
-        raise HTTPException(409, "An account with this email already exists.")
-    return UserResponse(id=user_id, email=email, role="rep")
+        raise HTTPException(409, "An account or an invitation for another role already exists for this email.")
+    return InvitationResponse(role=request.role, email=email, code=code, expires_at=expires_at)
 
 
-@router.post(
-    "/employees/register",
-    response_model=SessionResponse,
-    response_model_exclude_none=True,
-    status_code=201,
-)
-def register_employee(registration: EmployeeRegistration):
+@router.post("/register", response_model=SessionResponse, response_model_exclude_none=True, status_code=201)
+def register(registration: Registration, request: Request):
     email = normalize_email(registration.email)
-    full_name = registration.full_name
-    mobile_number = (registration.mobile_number or "").strip() or None
-    user_id = uuid4().hex
-    if not get_store().create_account(
-        user_id,
-        email,
-        hash_password(registration.password),
-        "employee",
-        full_name=full_name,
-        mobile_number=mobile_number,
-    ):
-        raise HTTPException(409, "An account with this email already exists.")
-    return _new_session(user_id, email, "employee", full_name, mobile_number)
-
-
-@router.post("/set-password", response_model=SessionResponse, response_model_exclude_none=True)
-def set_employee_password(setup: PasswordSetup, request: Request):
-    email = normalize_email(setup.email)
-    setup_hash = hashlib.sha256(setup.setup_code.encode("ascii")).hexdigest()
+    code_hash = _code_hash(registration.code)
     store = get_store()
     client_ip = request.client.host if request.client else "unknown"
-    if not store.employee_setup_attempt_allowed(email, client_ip):
-        raise HTTPException(429, "Too many setup-code attempts. Try again in 15 minutes.")
-    if not store.employee_setup_valid(email, setup_hash):
-        store.record_employee_setup_failure(email, client_ip)
-        raise HTTPException(401, "The account or setup code is invalid or already used.")
-    user_id = store.set_employee_password(email, setup_hash, hash_password(setup.password))
+    if not store.registration_attempt_allowed(email, client_ip):
+        raise HTTPException(429, "Too many registration attempts. Try again in 15 minutes.")
+    role = store.invitation_role(email, code_hash)
+    if role is None:
+        store.record_registration_failure(email, client_ip)
+        raise HTTPException(401, "The email or registration code is invalid, expired, or already used.")
+    if role != registration.role:
+        raise HTTPException(409, f"This code was issued for the {role} role.")
+    user_id = store.accept_invitation(email, code_hash, hash_password(registration.password))
     if user_id is None:
-        store.record_employee_setup_failure(email, client_ip)
-        raise HTTPException(401, "The account or setup code is invalid or already used.")
-    store.clear_employee_setup_attempts(email, client_ip)
-    user = get_store().user_by_email(email)
-    return _new_session(user_id, email, "employee", user["full_name"], user["mobile_number"])
+        store.record_registration_failure(email, client_ip)
+        raise HTTPException(401, "The email or registration code is invalid, expired, or already used.")
+    store.clear_registration_attempts(email, client_ip)
+    user = store.user_by_email(email)
+    return _new_session(user_id, email, role, user["full_name"], user["mobile_number"])
 
 
 @router.post("/login", response_model=SessionResponse, response_model_exclude_none=True)
