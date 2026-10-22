@@ -35,7 +35,7 @@ function currentText(option, catalog) {
 
 function Row({ label, value, source }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5">
+    <div className="flex items-center justify-between gap-3 border-b border-border/60 py-1.5">
       <span className="text-ink-soft">{label}</span>
       <span className="flex items-center gap-2 text-left">
         <span className="num font-medium">{value}</span>
@@ -167,7 +167,7 @@ export default function ProfileCard({ state, catalog, onUpdated }) {
           }}
         />
       ) : (
-        <div className="divide-y divide-border/60 text-sm">
+        <div className="grid text-sm xl:grid-cols-2 xl:gap-x-10">
           {FIELDS.map(([key, label, unit]) => (
             <Row key={key} label={label} value={show(p[key]?.value, unit)} source={p[key]?.source ?? "missing"} />
           ))}

@@ -179,18 +179,19 @@ export default function EmployeePage() {
   const messages = state?.messages ?? [];
 
   return (
-    <div className="space-y-8">
-      <section className="max-w-2xl">
-        <h1 className="font-display text-3xl font-bold leading-tight sm:text-5xl">
+    <div className="space-y-6">
+      <section className="flex flex-wrap items-end justify-between gap-x-8 gap-y-2">
+        <h1 className="font-display text-3xl font-bold leading-tight sm:text-4xl">
           מה יקרה <span className="petal-text">לנטו שלי?</span>
         </h1>
-        <p className="mt-3 text-ink-soft sm:text-lg">
+        <p className="text-ink-soft sm:text-lg">
           רכב חשמלי, רכב אחר או ויתור על הרכב: תשובה מדויקת תוך דקה, עם הסבר לכל שקל.
         </p>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
-        <Card className="glass flex h-[72vh] min-h-[480px] flex-col p-0">
+      {/* הצ'אט קבוע בצד ומלא לגובה המסך; ההשוואה תופסת את כל שאר הרוחב */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(360px,1fr)_minmax(0,1.6fr)] 2xl:grid-cols-[minmax(420px,1fr)_minmax(0,2.2fr)]">
+        <Card className="glass flex h-[72vh] min-h-[480px] flex-col p-0 lg:sticky lg:top-24 lg:h-[calc(100vh-7.5rem)]">
           <div className="flex items-center justify-between border-b border-border/70 px-5 py-3">
             <div className="flex items-center gap-2.5">
               <div className="relative">
@@ -288,7 +289,7 @@ export default function EmployeePage() {
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="כתבו כאן…"
-              className="flex-1 rounded-full border border-border bg-surface px-4 py-2.5 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15"
+              className="min-w-0 flex-1 rounded-full border border-border bg-surface px-4 py-2.5 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/15"
             />
             <Button type="submit" disabled={busy}>
               שליחה

@@ -12,13 +12,37 @@ import EmployeePage from "./pages/EmployeePage";
 import RepPage from "./pages/RepPage";
 import RulesPage from "./pages/RulesPage";
 
-const NAV = [
-  { to: "/employee", label: "עובד" },
-  { to: "/rep", label: "נציג תחבורה" },
-  { to: "/admin", label: "ניהול נציגים" },
-  { to: "/rules", label: "כללים" },
-  // /design — דף ייחוס פנימי למפתחות, לא בתפריט. נכנסים בכתובת ישירה
-];
+// כל תפקיד רואה רק את המסכים שלו: לעובד ולנציג יש מסך אחד, ולכן אין להם תפריט.
+// /design — דף ייחוס פנימי למפתחות, לא בתפריט. נכנסים בכתובת ישירה
+const NAV = {
+  admin: [
+    { to: "/admin", label: "ניהול נציגים" },
+    { to: "/rules", label: "כללים" },
+  ],
+};
+
+const ROLE_LABEL = { employee: "עובד/ת", rep: "נציג/ת תחבורה", admin: "מנהל/ת" };
+
+function UserChip({ user, onLogout }) {
+  const name = user.full_name || user.email;
+  return (
+    <div className="flex items-center gap-2 rounded-full border border-border/80 bg-surface/80 py-1 pe-1 ps-1.5 shadow-card">
+      <span className="petal-ribbon grid h-8 w-8 shrink-0 place-items-center rounded-full font-display text-sm font-bold text-white">
+        {name.trim()[0]?.toUpperCase()}
+      </span>
+      <div className="hidden min-w-0 leading-tight sm:block">
+        <div className="max-w-[12rem] truncate text-sm font-medium">{name}</div>
+        <div className="text-[11px] text-ink-soft">{ROLE_LABEL[user.role] ?? user.role}</div>
+      </div>
+      <button
+        className="rounded-full px-3 py-1.5 text-sm text-ink-soft transition hover:bg-muted hover:text-ink"
+        onClick={onLogout}
+      >
+        יציאה
+      </button>
+    </div>
+  );
+}
 
 /** פס הקשת מתחת לכותרת: מתמלא מימין לשמאל לפי מיקום הגלילה בדף */
 function ScrollProgress() {
@@ -62,7 +86,7 @@ function Shell() {
   return (
     <div className="aurora relative isolate min-h-screen">
       <header className="glass sticky top-0 z-10">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-8">
           <NavLink
             to="/"
             aria-label="דף הבית"
@@ -75,8 +99,9 @@ function Shell() {
               <div className="text-xs text-ink-soft">מה יקרה לנטו שלי?</div>
             </div>
           </NavLink>
+          {NAV[user?.role] && (
           <nav className="flex max-w-full gap-1 overflow-x-auto rounded-full bg-muted/80 p-1">
-            {NAV.filter((n) => !["/admin", "/rules"].includes(n.to) || user?.role === "admin").map((n) => (
+            {NAV[user.role].map((n) => (
               <NavLink
                 key={n.to}
                 to={n.to}
@@ -88,26 +113,25 @@ function Shell() {
               >
                 {n.label}
               </NavLink>
-            )            )}
+            ))}
           </nav>
+          )}
           <div className="flex items-center gap-2">
             {user ? (
-              <>
-                <span className="hidden text-xs text-ink-soft sm:inline">{user.email}</span>
-                <button className="rounded-full px-3 py-1.5 text-sm text-ink-soft hover:bg-muted" onClick={logout}>
-                  Log out
-                </button>
-              </>
+              <UserChip user={user} onLogout={logout} />
             ) : !checking ? (
-              <NavLink className="rounded-full px-3 py-1.5 text-sm text-ink-soft hover:bg-muted" to="/login">
-                Log in
+              <NavLink
+                className="rounded-full border border-border bg-surface/80 px-4 py-1.5 text-sm font-medium transition hover:border-brand hover:text-brand"
+                to="/login"
+              >
+                התחברות
               </NavLink>
             ) : null}
           </div>
         </div>
         <ScrollProgress />
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main className="w-full px-4 py-6 sm:px-8">
         <Routes>
           <Route path="/" element={<Navigate to={user ? "/employee" : "/welcome"} replace />} />
           <Route path="/welcome" element={<AuthPage mode="welcome" />} />
