@@ -38,7 +38,7 @@ export default function ComparisonGrid({ comparison }) {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
         <OptionCard result={comparison.current} isCurrent />
         {shown.map((a, i) => (
           <OptionCard key={`${a.option.kind}-${a.option.car_id ?? ""}-${i}`} result={a} current={comparison.current} />
@@ -61,7 +61,7 @@ export default function ComparisonGrid({ comparison }) {
             </ul>
           </details>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
             {blocked.map((a, i) => (
               <OptionCard key={i} result={a} current={comparison.current} />
             ))}

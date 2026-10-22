@@ -1,9 +1,4 @@
-"""בכל בדיקה: DB זמני ומודל מתוסרט. הבדיקות אף פעם לא פונות לרשת ולא נוגעות ב-data/app.db.
-
-TEST_DATABASE_URL מריץ את אותן בדיקות מול PostgreSQL (DB ריק שנועד לבדיקות — הטבלאות מתרוקנות בכל בדיקה).
-"""
-import os
-
+"""בכל בדיקה: DB זמני ומודל מתוסרט. הבדיקות אף פעם לא פונות לרשת ולא נוגעות ב-data/app.db."""
 import pytest
 from google.genai import types
 
@@ -11,17 +6,6 @@ from app.agent import orchestrator
 from app.auth import AuthenticatedUser, get_current_user, require_representative
 from app.main import app
 from app.store import Store, use_store
-
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
-TABLES = (
-    "auth_sessions, conversations, employee_profiles, rep_questions, users, "
-    "employee_setup_attempts, representative_activation_codes"
-)
-
-
-def make_store(tmp_path) -> Store:
-    """אותו DB בכל קריאה בתוך בדיקה — כמו הפעלה מחדש של השרת."""
-    return Store(tmp_path / "app.db", url=TEST_DATABASE_URL)
 
 
 class ScriptedLLM:
@@ -53,9 +37,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.delenv("ADMIN_ACCESS_CODE", raising=False)
     monkeypatch.delenv("ADMIN_USERNAME", raising=False)
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
-    store = make_store(tmp_path)
-    if TEST_DATABASE_URL:
-        store._con.execute(f"TRUNCATE {TABLES}")
+    store = Store(tmp_path / "app.db")
     use_store(store)
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id="test-employee", email="employee@example.test",

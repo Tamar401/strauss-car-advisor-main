@@ -140,8 +140,14 @@ export default function RepPage() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 3000); // שאלות חדשות מופיעות בלי רענון
-    return () => clearInterval(t);
+    // שאלות חדשות מופיעות בלי רענון; כשהלשונית מוסתרת לא פונים לשרת, ובחזרה אליה מתעדכנים מיד
+    const t = setInterval(() => !document.hidden && load(), 3000);
+    const onVisible = () => !document.hidden && load();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const open = questions.filter((q) => q.status === "open");
